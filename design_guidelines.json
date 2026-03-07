@@ -1,0 +1,101 @@
+{
+  "identity": {
+    "name": "JT-Zero Ground Station",
+    "mission": "Provide a professional, high-performance, dark-mode engineering dashboard for monitoring and controlling the JT-Zero drone autonomy system.",
+    "aesthetic": "Orbital Command / Cyberpunk Terminal / Glass Cockpit",
+    "tone": "Precision, Stability, Technical Authority, Hard Sci-Fi"
+  },
+  "typography": {
+    "font_family": {
+      "mono": "JetBrains Mono, monospace",
+      "sans": "JetBrains Mono, monospace"
+    },
+    "styles": {
+      "h1": "text-2xl font-bold uppercase tracking-widest text-cyan-400",
+      "h2": "text-lg font-semibold uppercase tracking-wider text-slate-300",
+      "h3": "text-sm font-medium uppercase tracking-wide text-slate-500",
+      "body": "text-sm text-slate-400",
+      "data_value": "font-mono tabular-nums text-cyan-300 font-bold",
+      "label": "text-xs uppercase text-slate-600 tracking-wider"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": "#050505",
+      "panel_bg": "#0A0C10",
+      "panel_border": "#1E293B",
+      "text_primary": "#E2E8F0",
+      "text_secondary": "#94A3B8",
+      "text_muted": "#64748B",
+      "accent_primary": "#00F0FF",
+      "accent_secondary": "#7dd3fc",
+      "status_success": "#10B981",
+      "status_warning": "#F59E0B",
+      "status_danger": "#EF4444",
+      "grid_line": "#1f2937"
+    },
+    "usage": {
+      "background": "bg-[#050505]",
+      "panel": "bg-[#0A0C10] border border-[#1E293B]",
+      "text_highlight": "text-[#00F0FF] drop-shadow-[0_0_5px_rgba(0,240,255,0.5)]",
+      "text_danger": "text-[#EF4444] drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]"
+    }
+  },
+  "layout_strategy": {
+    "grid_system": "grid grid-cols-1 md:grid-cols-12 gap-2 p-2 h-screen overflow-hidden",
+    "bento_grid": {
+      "sidebar": "col-span-12 md:col-span-2 row-span-full border-r border-[#1E293B] bg-[#0A0C10] p-4 flex flex-col gap-4",
+      "main_view": "col-span-12 md:col-span-7 row-span-full flex flex-col gap-2 overflow-y-auto",
+      "status_panel": "col-span-12 md:col-span-3 row-span-full border-l border-[#1E293B] bg-[#0A0C10] flex flex-col gap-2"
+    },
+    "panel_style": "relative bg-[#0A0C10]/80 backdrop-blur-sm border border-[#1E293B] p-4 flex flex-col gap-2 overflow-hidden group hover:border-[#00F0FF]/30 transition-colors duration-300"
+  },
+  "components": {
+    "TelemetryRow": {
+      "description": "A single row of key-value pair for sensor data.",
+      "structure": "<div className='flex justify-between items-center border-b border-[#1E293B]/50 py-1 last:border-0'><span className='text-xs text-slate-500 uppercase'>{label}</span><span className='font-mono text-sm text-[#00F0FF] tabular-nums'>{value}</span></div>"
+    },
+    "StatusBadge": {
+      "description": "Indicator for system health (IMU, GPS, etc).",
+      "structure": "<div className='flex items-center gap-2'><div className={`w-2 h-2 rounded-full ${status === 'ok' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 animate-pulse'}`} /><span className='text-xs font-bold text-slate-300'>{label}</span></div>"
+    },
+    "TerminalLog": {
+      "description": "Real-time scrolling event log.",
+      "structure": "<div className='h-full overflow-y-auto font-mono text-xs p-2 bg-black/50 border border-[#1E293B] text-green-400 space-y-1 scrollbar-hide'>{logs.map((log, i) => <div key={i}><span className='text-slate-600'>[{log.timestamp}]</span> <span className={log.type === 'error' ? 'text-red-500' : 'text-green-400'}>{log.message}</span></div>)}</div>"
+    }
+  },
+  "visual_enhancers": {
+    "scanlines": "background: repeating-linear-gradient(0deg, transparent, transparent 1px, #000 1px, #000 2px); opacity: 0.1; pointer-events: none; position: absolute; inset: 0; z-index: 10;",
+    "corner_brackets": "absolute w-2 h-2 border-t border-l border-[#00F0FF] top-0 left-0 opacity-50 group-hover:opacity-100 transition-opacity",
+    "glass_panel": "bg-[#0A0C10]/90 backdrop-blur-md border border-[#1E293B]"
+  },
+  "charts": {
+    "library": "recharts",
+    "style": {
+      "grid": "stroke-[#1E293B] stroke-dasharray='3 3'",
+      "tooltip": "bg-[#0A0C10] border border-[#1E293B] text-[#00F0FF]",
+      "line_primary": "stroke-[#00F0FF] stroke-width='2' dot={false}",
+      "line_secondary": "stroke-[#64748B] stroke-width='1' dot={false}"
+    }
+  },
+  "icons": {
+    "library": "lucide-react",
+    "style": "w-4 h-4 text-slate-500"
+  },
+  "image_urls": {
+    "map_placeholder": "https://images.unsplash.com/photo-1641232266653-00f1ee88ee45?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTJ8MHwxfHNlYXJjaHwyfHxkYXJrJTIwdG9wb2dyYXBoaWNhbCUyMG1hcCUyMHRleHR1cmV8ZW58MHx8fHwxNzcyOTIzOTkzfDA&ixlib=rb-4.1.0&q=85",
+    "drone_placeholder": ""
+  },
+  "universal_guidelines": [
+    "Use 'JetBrains Mono' for all text elements to maintain the engineering aesthetic.",
+    "Ensure all numeric data uses 'tabular-nums' to prevent layout shifts during rapid updates.",
+    "Do not use gradients for backgrounds; use solid dark colors (#050505, #0A0C10) to maximize contrast.",
+    "Use Cyan (#00F0FF) for normal values, Amber (#F59E0B) for warnings, and Red (#EF4444) for errors.",
+    "Implement a 'Heartbeat' indicator in the top bar to show system liveness.",
+    "Use CSS Grid for the main layout to create a rigid, dashboard-like structure.",
+    "Avoid rounded corners greater than 'rounded-sm' or use 'rounded-none' for a sharp, technical look.",
+    "All interactive elements must have a 'data-testid' attribute.",
+    "Use 'recharts' for data visualization with minimal styling (hide axes lines if possible, focus on the data curve).",
+    "The 'Terminal' section should always auto-scroll to the bottom on new logs."
+  ]
+}
