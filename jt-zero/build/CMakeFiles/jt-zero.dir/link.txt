@@ -1,0 +1,1 @@
+/usr/bin/c++ "CMakeFiles/jt-zero.dir/main.cpp.o" -o jt-zero  libjtzero_core.a -lpthread 

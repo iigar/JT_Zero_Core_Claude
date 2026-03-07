@@ -1,0 +1,2 @@
+/usr/bin/ar qc libjtzero_core.a CMakeFiles/jtzero_core.dir/core/event_engine.cpp.o CMakeFiles/jtzero_core.dir/core/reflex_engine.cpp.o CMakeFiles/jtzero_core.dir/core/rule_engine.cpp.o CMakeFiles/jtzero_core.dir/core/memory_engine.cpp.o CMakeFiles/jtzero_core.dir/core/output_engine.cpp.o CMakeFiles/jtzero_core.dir/core/runtime.cpp.o CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.o
+/usr/bin/ranlib libjtzero_core.a
