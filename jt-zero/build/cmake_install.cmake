@@ -43,6 +43,30 @@ if(NOT DEFINED CMAKE_OBJDUMP)
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  if(EXISTS "$ENV{DESTDIR}/app/jt-zero/../backend/jtzero_native.cpython-311-aarch64-linux-gnu.so" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}/app/jt-zero/../backend/jtzero_native.cpython-311-aarch64-linux-gnu.so")
+    file(RPATH_CHECK
+         FILE "$ENV{DESTDIR}/app/jt-zero/../backend/jtzero_native.cpython-311-aarch64-linux-gnu.so"
+         RPATH "")
+  endif()
+  list(APPEND CMAKE_ABSOLUTE_DESTINATION_FILES
+   "/app/jt-zero/../backend/jtzero_native.cpython-311-aarch64-linux-gnu.so")
+  if(CMAKE_WARN_ON_ABSOLUTE_INSTALL_DESTINATION)
+    message(WARNING "ABSOLUTE path INSTALL DESTINATION : ${CMAKE_ABSOLUTE_DESTINATION_FILES}")
+  endif()
+  if(CMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION)
+    message(FATAL_ERROR "ABSOLUTE path INSTALL DESTINATION forbidden (by caller): ${CMAKE_ABSOLUTE_DESTINATION_FILES}")
+  endif()
+  file(INSTALL DESTINATION "/app/jt-zero/../backend" TYPE MODULE FILES "/app/jt-zero/build/jtzero_native.cpython-311-aarch64-linux-gnu.so")
+  if(EXISTS "$ENV{DESTDIR}/app/jt-zero/../backend/jtzero_native.cpython-311-aarch64-linux-gnu.so" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}/app/jt-zero/../backend/jtzero_native.cpython-311-aarch64-linux-gnu.so")
+    if(CMAKE_INSTALL_DO_STRIP)
+      execute_process(COMMAND "/usr/bin/strip" "$ENV{DESTDIR}/app/jt-zero/../backend/jtzero_native.cpython-311-aarch64-linux-gnu.so")
+    endif()
+  endif()
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
   if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/jt-zero" AND
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/jt-zero")
     file(RPATH_CHECK

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Activity, Wifi, WifiOff, Cpu, Zap, Clock } from 'lucide-react';
 
-export default function Header({ state, connected }) {
+export default function Header({ state, connected, runtimeMode }) {
   const modeColor = {
     IDLE: 'text-slate-400',
     ARMED: 'text-amber-400 glow-text-warn',
@@ -26,6 +26,12 @@ export default function Header({ state, connected }) {
           </span>
           <span className="text-[10px] text-slate-600 ml-1">v1.0</span>
         </div>
+
+        {runtimeMode === 'native' && (
+          <div className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 uppercase tracking-wider">
+            C++ Native
+          </div>
+        )}
 
         <div className="h-4 w-px bg-[#1E293B]" />
 

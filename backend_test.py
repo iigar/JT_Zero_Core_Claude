@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 
 class JTZeroTester:
-    def __init__(self, base_url="https://fbfa244b-bd64-431f-9b7a-74b7db44e787.preview.emergentagent.com"):
+    def __init__(self, base_url="https://pi-reflex-core.preview.emergentagent.com"):
         self.base_url = base_url
         self.tests_run = 0
         self.tests_passed = 0
@@ -72,7 +72,7 @@ class JTZeroTester:
             return False, {}
 
     def validate_health(self, data):
-        required_fields = ['status', 'runtime', 'version']
+        required_fields = ['status', 'runtime', 'version', 'mode', 'native']
         for field in required_fields:
             if field not in data:
                 return f"Missing field: {field}"
@@ -80,6 +80,23 @@ class JTZeroTester:
             return f"Status not ok: {data['status']}"
         if data['runtime'] != 'jt-zero':
             return f"Invalid runtime: {data['runtime']}"
+        
+        # Phase 7: Check native runtime is active
+        if data['mode'] != 'native':
+            return f"Expected native mode, got: {data['mode']}"
+        if not data['native']:
+            return f"Expected native=true, got: {data['native']}"
+        
+        # Check build info exists
+        if 'build_info' not in data:
+            return "Missing build_info for native runtime"
+        
+        build_info = data['build_info']
+        required_build_fields = ['compiler', 'cpp_standard', 'platform']
+        for field in required_build_fields:
+            if field not in build_info:
+                return f"Missing build_info field: {field}"
+        
         return True
 
     def validate_state(self, data):
@@ -196,13 +213,50 @@ class JTZeroTester:
         
         return True
 
+    def validate_performance(self, data):
+        """Validate performance endpoint (Phase 10)"""
+        if 'error' in data:
+            return f"Performance error: {data['error']}"
+        
+        required_sections = ['threads', 'memory', 'latency', 'throughput', 'total_cpu_percent']
+        for section in required_sections:
+            if section not in data:
+                return f"Missing performance section: {section}"
+        
+        # Validate threads (should have 7 running)
+        threads = data.get('threads', [])
+        if not isinstance(threads, list):
+            return "threads should be a list"
+        
+        running_threads = len([t for t in threads if t.get('running')])
+        if running_threads != 7:
+            return f"Expected 7 running threads, got {running_threads}"
+        
+        # Validate memory usage is reasonable (< 5MB total)
+        memory = data.get('memory', {})
+        total_mb = memory.get('total_mb', 0)
+        if total_mb >= 5:
+            return f"Memory usage too high: {total_mb:.2f}MB (expected < 5MB)"
+        
+        # Validate throughput has zero dropped events
+        throughput = data.get('throughput', {})
+        events_dropped = throughput.get('events_dropped', 1)  # Default to 1 to fail if missing
+        drop_rate = throughput.get('drop_rate', 1.0)
+        
+        if events_dropped != 0:
+            return f"Events dropped: {events_dropped} (expected 0)"
+        if drop_rate != 0:
+            return f"Drop rate: {drop_rate:.3f} (expected 0)"
+        
+        return True
+
     def test_all_endpoints(self):
         """Test all JT-Zero API endpoints"""
-        self.log("🚀 Starting JT-Zero Backend API Tests (Iteration 2 - Camera + MAVLink)")
+        self.log("🚀 Starting JT-Zero Backend API Tests (Iteration 3 - Native C++ Runtime + Performance)")
         
-        # Test health endpoint
+        # Test health endpoint (must show native mode)
         self.run_test(
-            "Health Check", 
+            "Health Check (Native Runtime)", 
             "GET", 
             "/api/health", 
             200, 
@@ -216,6 +270,15 @@ class JTZeroTester:
             "/api/state", 
             200, 
             validate_response=self.validate_state
+        )
+        
+        # Test NEW performance endpoint (Phase 10)
+        self.run_test(
+            "Performance Metrics", 
+            "GET", 
+            "/api/performance", 
+            200, 
+            validate_response=self.validate_performance
         )
         
         # Test events endpoint
@@ -263,25 +326,25 @@ class JTZeroTester:
             validate_response=self.validate_engines
         )
         
-        # Test new Camera endpoint (Phase 5)
+        # Test Camera endpoint (C++ pipeline)
         self.run_test(
-            "Camera Stats", 
+            "Camera Stats (C++ Pipeline)", 
             "GET", 
             "/api/camera", 
             200, 
             validate_response=self.validate_camera_stats
         )
         
-        # Test new MAVLink endpoint (Phase 6) 
+        # Test MAVLink endpoint (C++ MAVLink)
         self.run_test(
-            "MAVLink Stats", 
+            "MAVLink Stats (C++ MAVLink)", 
             "GET", 
             "/api/mavlink", 
             200, 
             validate_response=self.validate_mavlink_stats
         )
         
-        # Test command endpoints
+        # Test command endpoints (through C++ runtime)
         self.test_commands(state_data)
 
     def test_commands(self, initial_state):
@@ -332,7 +395,7 @@ class JTZeroTester:
                 "/api/state", 
                 200
             )
-            if success and new_state.get('flight_mode') == 'TAKEOFF':
+            if success and new_state.get('flight_mode') in ['TAKEOFF', 'HOVER']:
                 self.log("✅ TAKEOFF command changed state correctly")
                 self.tests_passed += 1
             else:

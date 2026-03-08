@@ -187,6 +187,43 @@ jt-zero/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/jt-zero.dir/build.make CMakeFiles/jt-zero.dir/build
 .PHONY : jt-zero/fast
 
+#=============================================================================
+# Target rules for targets named jtzero_native
+
+# Build rule for target.
+jtzero_native: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 jtzero_native
+.PHONY : jtzero_native
+
+# fast build rule for target.
+jtzero_native/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_native.dir/build.make CMakeFiles/jtzero_native.dir/build
+.PHONY : jtzero_native/fast
+
+api/python_bindings.o: api/python_bindings.cpp.o
+.PHONY : api/python_bindings.o
+
+# target to build an object file
+api/python_bindings.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_native.dir/build.make CMakeFiles/jtzero_native.dir/api/python_bindings.cpp.o
+.PHONY : api/python_bindings.cpp.o
+
+api/python_bindings.i: api/python_bindings.cpp.i
+.PHONY : api/python_bindings.i
+
+# target to preprocess a source file
+api/python_bindings.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_native.dir/build.make CMakeFiles/jtzero_native.dir/api/python_bindings.cpp.i
+.PHONY : api/python_bindings.cpp.i
+
+api/python_bindings.s: api/python_bindings.cpp.s
+.PHONY : api/python_bindings.s
+
+# target to generate assembly for a file
+api/python_bindings.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_native.dir/build.make CMakeFiles/jtzero_native.dir/api/python_bindings.cpp.s
+.PHONY : api/python_bindings.cpp.s
+
 camera/camera_pipeline.o: camera/camera_pipeline.cpp.o
 .PHONY : camera/camera_pipeline.o
 
@@ -441,6 +478,10 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... jt-zero"
 	@echo "... jtzero_core"
+	@echo "... jtzero_native"
+	@echo "... api/python_bindings.o"
+	@echo "... api/python_bindings.i"
+	@echo "... api/python_bindings.s"
 	@echo "... camera/camera_pipeline.o"
 	@echo "... camera/camera_pipeline.i"
 	@echo "... camera/camera_pipeline.s"

@@ -68,6 +68,9 @@ add_library(jtzero_core STATIC
     ${MAVLINK_SOURCES}
 )
 
+# Core lib needs -fPIC for linking into shared pybind11 module
+set_target_properties(jtzero_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_include_directories(jtzero_core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
 )
@@ -79,6 +82,30 @@ target_link_libraries(jtzero_core
 # ─── Main Executable ─────────────────────────────────────
 add_executable(jt-zero main.cpp)
 target_link_libraries(jt-zero jtzero_core pthread)
+
+# ─── Python Bindings (pybind11) ───────────────────────────
+find_package(pybind11 QUIET)
+if(pybind11_FOUND)
+    message(STATUS "pybind11 found - building Python module")
+    
+    pybind11_add_module(jtzero_native api/python_bindings.cpp)
+    
+    # Override embedded flags for pybind11 wrapper ONLY
+    # pybind11 requires exceptions and RTTI
+    target_compile_options(jtzero_native PRIVATE
+        -fexceptions -frtti
+    )
+    
+    target_link_libraries(jtzero_native PRIVATE jtzero_core pthread)
+    
+    # Install to backend directory for FastAPI to find
+    install(TARGETS jtzero_native
+        LIBRARY DESTINATION ${CMAKE_SOURCE_DIR}/../backend
+    )
+else()
+    message(STATUS "pybind11 not found - skipping Python module")
+    message(STATUS "Install: pip install pybind11")
+endif()
 
 # ─── Installation ─────────────────────────────────────────
 install(TARGETS jt-zero DESTINATION bin)
