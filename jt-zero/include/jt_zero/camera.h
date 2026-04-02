@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <array>
 #include <atomic>
+#include <mutex>
 
 namespace jtzero {
 
@@ -164,11 +165,15 @@ struct HoverState {
     float micro_motion_avg{0};       // px, average feature displacement
     int   stable_frame_count{0};     // consecutive frames with low motion
     float accumulated_yaw_drift{0};  // rad, total drift correction applied
-    
+    // Fix 3: gyro bias estimated during confirmed hover (rad/s)
+    // In true hover the drone doesn't rotate → any persistent gyro_z reading is bias
+    float gyro_z_bias{0};
+
     // Thresholds
     static constexpr float HOVER_MOTION_THRESH = 0.5f;  // px, below = hovering
     static constexpr int   HOVER_MIN_FRAMES    = 30;     // frames before hover confirmed
     static constexpr float DRIFT_ALPHA         = 0.02f;  // EMA smoothing for drift rate
+    static constexpr float BIAS_ALPHA          = 0.005f; // much slower EMA for bias (stable estimate)
 };
 
 // ─── Visual Odometry Result ──────────────────────────────
@@ -412,12 +417,16 @@ private:
 
 class LKTracker {
 public:
-    // Track features from prev frame to curr frame
-    // Updates feature positions in-place, sets tracked flag
+    // Track features from prev frame to curr frame.
+    // Updates feature positions in-place, sets tracked flag.
+    // hint_dx / hint_dy: optional per-feature initial flow guess (from IMU pre-integration).
+    // Providing hints lets LK start the iterative search closer to the true displacement,
+    // improving convergence rate and reducing lost tracks during fast rotation.
     int track(const uint8_t* prev_frame, const uint8_t* curr_frame,
               uint16_t width, uint16_t height,
               FeaturePoint* features, size_t feature_count,
-              int window_size = 7, int iterations = 5);
+              int window_size = 7, int iterations = 5,
+              const float* hint_dx = nullptr, const float* hint_dy = nullptr);
 
 private:
     // Compute image gradients at a point
@@ -434,8 +443,13 @@ public:
     // Process a new frame and compute VO estimate
     VOResult process(const FrameBuffer& frame, float ground_distance = 1.0f);
     
-    // Set IMU data for cross-validation (call before process())
+    // Set IMU data: accelerations for Kalman prediction + gyro for bias/consistency (call before process())
     void set_imu_hint(float ax, float ay, float gyro_z);
+
+    // Accumulate gyroscope rotation between frames for LK initial-flow hints.
+    // Called at 200 Hz from T1; consumed and reset each T6 frame in process().
+    // Thread-safe via internal mutex.
+    void accumulate_gyro(float gx, float gy, float gz, float dt);
     
     // Set current altitude for adaptive parameter adjustment
     void set_altitude(float altitude_agl);
@@ -492,12 +506,27 @@ private:
     // ── Long-range drift reduction ──
     
     // Kalman filter state per axis (simple 1D: [position_rate])
-    float kf_vx_{0}, kf_vy_{0};           // filtered velocity
+    float kf_vx_{0}, kf_vy_{0};               // filtered velocity
     float kf_vx_var_{1.0f}, kf_vy_var_{1.0f}; // velocity variance
-    
-    // IMU hint for cross-validation
+    // Fix 1: pre-update velocity snapshot for correct imu_consistency computation
+    float kf_vx_prev_{0}, kf_vy_prev_{0};
+
+    // Fix 5: accumulated position variance from KF covariance (m²)
+    // Grows each frame by kf_v*_var_ * dt², decays slowly when confidence is high
+    float pose_var_x_{0.5f}, pose_var_y_{0.5f};
+
+    // IMU hint for cross-validation and Kalman prediction
     float imu_ax_{0}, imu_ay_{0}, imu_gz_{0};
     bool  imu_hint_valid_{false};
+
+    // Fix 6: pre-integrated gyro rotation between T6 frames (rad, body frame)
+    // Written at 200 Hz by T1 via accumulate_gyro(); read+reset by T6 in process()
+    struct PreIntState {
+        float dgx{0}, dgy{0}, dgz{0};  // accumulated angle deltas (rad)
+        bool  valid{false};
+    };
+    PreIntState preint_;
+    std::mutex  preint_mtx_;
     
     // Running confidence metric
     float running_confidence_{0.5f};
@@ -515,7 +544,8 @@ private:
     HoverState hover_;
     float yaw_hint_{0};
     bool  yaw_hint_valid_{false};
-    void update_hover_state(float median_dx, float median_dy, float dt);
+    // Fix 3: gyro_z passed so hover can estimate IMU bias (in true hover rotation = 0)
+    void update_hover_state(float median_dx, float median_dy, float dt, float gyro_z);
     
     // Median + MAD computation helpers
     static float compute_median(float* arr, int n);
@@ -693,9 +723,17 @@ public:
     
     // Set altitude for adaptive parameters (call from runtime)
     void set_altitude(float altitude_agl);
-    
+
     // Set yaw hint for hover correction (call from runtime)
     void set_yaw_hint(float yaw_rad);
+
+    // Feed IMU data to VO for Kalman prediction + consistency check (call before tick())
+    void set_imu_hint(float ax, float ay, float gz) { vo_.set_imu_hint(ax, ay, gz); }
+
+    // Accumulate gyro rotation between frames for LK initial-flow hints (call from T1 at 200 Hz)
+    void accumulate_gyro(float gx, float gy, float gz, float dt) {
+        vo_.accumulate_gyro(gx, gy, gz, dt);
+    }
     
     // ── Multi-camera support ──
     

@@ -219,10 +219,11 @@ void LKTracker::compute_gradient(const uint8_t* frame, uint16_t width,
 int LKTracker::track(const uint8_t* prev_frame, const uint8_t* curr_frame,
                       uint16_t width, uint16_t height,
                       FeaturePoint* features, size_t feature_count,
-                      int window_size, int iterations) {
+                      int window_size, int iterations,
+                      const float* hint_dx, const float* hint_dy) {
     const int half_win = window_size / 2;
     int tracked = 0;
-    
+
     // Bilinear interpolation helper (sub-pixel accuracy — critical for convergence)
     auto bilerp = [width, height](const uint8_t* img, float fx, float fy) -> float {
         int ix = static_cast<int>(fx);
@@ -237,19 +238,22 @@ int LKTracker::track(const uint8_t* prev_frame, const uint8_t* curr_frame,
         return (1 - dx) * (1 - dy) * tl + dx * (1 - dy) * tr
              + (1 - dx) * dy * bl + dx * dy * br;
     };
-    
+
     for (size_t f = 0; f < feature_count; ++f) {
         float px = features[f].x;
         float py = features[f].y;
-        
+
         // Skip if too close to border
         if (px < half_win + 2 || px >= width - half_win - 2 ||
             py < half_win + 2 || py >= height - half_win - 2) {
             features[f].tracked = false;
             continue;
         }
-        
-        float flow_x = 0, flow_y = 0;
+
+        // Fix 6: seed flow from IMU pre-integration hint (reduces iterations needed,
+        // improves tracking during fast rotations between frames)
+        float flow_x = (hint_dx != nullptr) ? hint_dx[f] : 0.0f;
+        float flow_y = (hint_dy != nullptr) ? hint_dy[f] : 0.0f;
         bool converged = false;
         
         for (int iter = 0; iter < iterations; ++iter) {
@@ -339,6 +343,15 @@ void VisualOdometry::set_imu_hint(float ax, float ay, float gyro_z) {
     imu_hint_valid_ = true;
 }
 
+void VisualOdometry::accumulate_gyro(float gx, float gy, float gz, float dt) {
+    // Fix 6: called from T1 at 200 Hz; accumulates rotation between T6 frames
+    std::lock_guard<std::mutex> lk(preint_mtx_);
+    preint_.dgx += gx * dt;
+    preint_.dgy += gy * dt;
+    preint_.dgz += gz * dt;
+    preint_.valid = true;
+}
+
 void VisualOdometry::set_altitude(float altitude_agl) {
     current_altitude_ = altitude_agl;
     update_adaptive_params();
@@ -414,34 +427,42 @@ void VisualOdometry::update_adaptive_params() {
 }
 
 // ── Hover yaw correction ──
-void VisualOdometry::update_hover_state(float median_dx, float median_dy, float dt) {
+void VisualOdometry::update_hover_state(float median_dx, float median_dy, float dt, float gyro_z) {
     // Compute average micro-motion magnitude (in pixels)
     float motion_mag = std::sqrt(median_dx * median_dx + median_dy * median_dy);
-    
+
     // EMA of motion magnitude
     hover_.micro_motion_avg = 0.1f * motion_mag + 0.9f * hover_.micro_motion_avg;
-    
+
     if (hover_.micro_motion_avg < HoverState::HOVER_MOTION_THRESH) {
         hover_.stable_frame_count++;
         if (hover_.stable_frame_count >= HoverState::HOVER_MIN_FRAMES) {
             hover_.is_hovering = true;
             hover_.hover_duration_sec += dt;
-            
-            // Estimate yaw drift from micro-motion pattern
-            // During hover, systematic x-displacement indicates yaw rotation
-            // drift_rate ≈ median_dx / focal_length (radians per frame)
+
+            // Fix 3: gyro bias estimation during confirmed hover.
+            // In true hover the drone does not rotate → any persistent gyro_z reading = bias.
+            // Sanity gate: only update if gyro_z is small (not a real intentional rotation).
+            if (std::fabs(gyro_z) < 0.3f) {  // ~17°/s gate
+                hover_.gyro_z_bias += (gyro_z - hover_.gyro_z_bias) * HoverState::BIAS_ALPHA;
+            }
+
+            // Estimate yaw drift from micro-motion pattern.
+            // During hover, systematic x-displacement indicates residual yaw rotation.
+            // drift_rate ≈ median_dx / focal_length (rad/frame), then convert to rad/s.
+            // Subtract known gyro bias so only true optical drift accumulates.
             if (platform_.focal_length_px > 0 && dt > 0) {
-                float frame_yaw_drift = median_dx / platform_.focal_length_px; // rad per frame
-                float rate = frame_yaw_drift / dt; // rad/s
-                
-                // Smooth the drift rate estimate
-                hover_.yaw_drift_rate = HoverState::DRIFT_ALPHA * rate + 
+                float frame_yaw_drift = median_dx / platform_.focal_length_px;
+                float rate = frame_yaw_drift / dt;
+                // Remove bias component from rate (gyro_z ≈ bias + true_rotation)
+                float corrected_rate = rate - hover_.gyro_z_bias;
+
+                hover_.yaw_drift_rate = HoverState::DRIFT_ALPHA * corrected_rate +
                     (1.0f - HoverState::DRIFT_ALPHA) * hover_.yaw_drift_rate;
-                
-                // Accumulate correction
+
                 hover_.accumulated_yaw_drift += hover_.yaw_drift_rate * dt;
             }
-            
+
             // Update corrected yaw (subtract estimated drift)
             if (yaw_hint_valid_) {
                 hover_.corrected_yaw = yaw_hint_ - hover_.accumulated_yaw_drift;
@@ -450,7 +471,7 @@ void VisualOdometry::update_hover_state(float median_dx, float median_dy, float 
     } else {
         // Motion detected — exit hover or reset counter
         if (hover_.is_hovering) {
-            // Keep accumulated correction but stop accumulating
+            // Keep accumulated correction and bias estimate, stop accumulating
             hover_.is_hovering = false;
         }
         hover_.stable_frame_count = 0;
@@ -557,13 +578,43 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     for (size_t i = 0; i < active_count_; ++i) {
         prev_features_[i] = features_[i];
     }
-    
-    // Track existing features using adaptive LK parameters
+
+    // Fix 6: build per-feature initial flow hints from IMU pre-integrated rotation.
+    // Accumulated between frames at 200 Hz by T1; read and reset atomically here.
+    // For a forward-looking camera: yaw (dgz) → horizontal shift, pitch (dgy) → vertical.
+    // These hints let LK start closer to the true displacement, reducing convergence
+    // iterations and preventing track loss during abrupt rotations.
+    float hint_dx_buf[MAX_FEATURES];
+    float hint_dy_buf[MAX_FEATURES];
+    const float* lk_hint_dx = nullptr;
+    const float* lk_hint_dy = nullptr;
+
+    {
+        std::lock_guard<std::mutex> lk(preint_mtx_);
+        if (preint_.valid && platform_.focal_length_px > 0) {
+            float shift_x =  platform_.focal_length_px * preint_.dgz;  // yaw → lateral
+            float shift_y = -platform_.focal_length_px * preint_.dgy;  // pitch → vertical
+            // Only apply if the predicted shift is non-trivial (>0.3 px) to avoid
+            // polluting LK with floating-point noise when the drone is stationary
+            if (std::fabs(shift_x) + std::fabs(shift_y) > 0.3f) {
+                for (size_t i = 0; i < active_count_; ++i) {
+                    hint_dx_buf[i] = shift_x;
+                    hint_dy_buf[i] = shift_y;
+                }
+                lk_hint_dx = hint_dx_buf;
+                lk_hint_dy = hint_dy_buf;
+            }
+        }
+        preint_ = {};  // reset for next frame regardless
+    }
+
+    // Track existing features using adaptive LK parameters + optional IMU rotation hint
     int tracked_count = tracker_.track(
         prev_frame_, frame.data,
         frame.info.width, frame.info.height,
         features_.data(), active_count_,
-        lk_win, lk_iter);
+        lk_win, lk_iter,
+        lk_hint_dx, lk_hint_dy);
     
     // ════════════════════════════════════════════════════
     // Phase 1: Median filter + MAD outlier rejection
@@ -631,49 +682,70 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     float raw_vy = (dt > 0) ? raw_dy / dt : 0;
     
     // ════════════════════════════════════════════════════
-    // Phase 2: Kalman filter (adaptive noise parameters)
+    // Phase 2: Kalman filter (adaptive noise + IMU prediction)
     // ════════════════════════════════════════════════════
-    
+
     float Q_accel = adaptive_.kalman_q;
     float Q = Q_accel * Q_accel * dt * dt;
-    
+
     float inlier_ratio = (valid_flow > 0) ? static_cast<float>(inlier_count) / static_cast<float>(valid_flow) : 0;
     float R = adaptive_.kalman_r_base / std::max(0.1f, inlier_ratio);
-    
-    // Predict
+
+    // Fix 1: snapshot velocity BEFORE predict so Phase 3 can compare
+    // ΔV_VO = raw_vx - kf_vx_prev_ (VO-measured velocity change this frame)
+    // ΔV_IMU = imu_ax_ * dt         (IMU-predicted velocity change this frame)
+    // Previously used (raw_vx - kf_vx_) which is the post-update residual, not ΔV.
+    kf_vx_prev_ = kf_vx_;
+    kf_vy_prev_ = kf_vy_;
+
+    // Fix 4: IMU prediction step — use accelerometer to advance state estimate.
+    // Replaces the pure variance-growth predict with a physics-based predict:
+    //   v_predicted = v_prev + a * dt
+    // This reduces velocity error during fast maneuvers where VO measurement
+    // lags behind actual motion.
+    if (imu_hint_valid_) {
+        kf_vx_ += imu_ax_ * dt;
+        kf_vy_ += imu_ay_ * dt;
+    }
+    // Process noise grows variance each frame regardless of IMU availability
     kf_vx_var_ += Q;
     kf_vy_var_ += Q;
-    
-    // Update
+
+    // Update (VO measurement corrects IMU-predicted state)
     float Kx = kf_vx_var_ / (kf_vx_var_ + R);
     float Ky = kf_vy_var_ / (kf_vy_var_ + R);
     kf_vx_ += Kx * (raw_vx - kf_vx_);
     kf_vy_ += Ky * (raw_vy - kf_vy_);
     kf_vx_var_ *= (1.0f - Kx);
     kf_vy_var_ *= (1.0f - Ky);
-    
+
     result.vx = kf_vx_;
     result.vy = kf_vy_;
     result.dx = kf_vx_ * dt;
     result.dy = kf_vy_ * dt;
     result.dz = 0;
     result.vz = 0;
-    
+
     // ════════════════════════════════════════════════════
-    // Phase 3: IMU-aided validation
+    // Phase 3: IMU-aided validation (fixed)
     // ════════════════════════════════════════════════════
-    
+
     float imu_consistency = 1.0f;
-    
+
     if (imu_hint_valid_ && dt > 0) {
+        // Fix 1: correct comparison — both quantities must be velocity DELTAS.
+        // ΔV_IMU = a * dt  (accelerometer-predicted velocity change this frame)
+        // ΔV_VO  = raw_vx - kf_vx_prev_  (VO-observed velocity change, using
+        //          pre-predict state so we compare matching time intervals)
         float expected_dvx = imu_ax_ * dt;
         float expected_dvy = imu_ay_ * dt;
-        float actual_dvx = raw_vx - kf_vx_;
-        float actual_dvy = raw_vy - kf_vy_;
+        float actual_dvx   = raw_vx - kf_vx_prev_;
+        float actual_dvy   = raw_vy - kf_vy_prev_;
         float discrepancy = std::sqrt(
             (actual_dvx - expected_dvx) * (actual_dvx - expected_dvx) +
             (actual_dvy - expected_dvy) * (actual_dvy - expected_dvy));
-        imu_consistency = std::max(0.1f, 1.0f - discrepancy * 0.5f);
+        // Scale: 1 m/s² discrepancy over 1 frame (66ms) ≈ 0.066 m/s delta → ~0.33 penalty
+        imu_consistency = std::max(0.1f, 1.0f - discrepancy * 5.0f);
         imu_hint_valid_ = false;
     }
     
@@ -697,21 +769,36 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         pose_x_ += result.dx;
         pose_y_ += result.dy;
         total_distance_ += std::sqrt(result.dx * result.dx + result.dy * result.dy);
+        // Fix 5: accumulate position variance from Kalman velocity variance.
+        // pose_var += kf_v_var * dt²  (integrated position uncertainty each step)
+        // Decay when tracking is good so uncertainty doesn't grow unboundedly.
+        pose_var_x_ += kf_vx_var_ * dt * dt;
+        pose_var_y_ += kf_vy_var_ * dt * dt;
+        if (running_confidence_ > 0.7f) {
+            // High-confidence tracking: slowly shrink accumulated uncertainty
+            pose_var_x_ *= 0.995f;
+            pose_var_y_ *= 0.995f;
+        }
     } else {
         result.dx = 0;
         result.dy = 0;
         result.vx = 0;
         result.vy = 0;
+        // No position update → uncertainty grows faster (we're dead-reckoning)
+        pose_var_x_ += kf_vx_var_ * dt * dt * 4.0f;
+        pose_var_y_ += kf_vy_var_ * dt * dt * 4.0f;
     }
-    
-    float drift_rate = 0.03f * (1.0f - running_confidence_ * 0.5f);
-    result.position_uncertainty = total_distance_ * drift_rate;
-    
+
+    // Fix 5: position uncertainty from KF covariance, not ad-hoc distance * drift_rate.
+    // sqrt(pose_var_x + pose_var_y) gives 1-sigma radial position uncertainty in meters.
+    result.position_uncertainty = std::sqrt(pose_var_x_ + pose_var_y_);
+
     // ════════════════════════════════════════════════════
     // Phase 5: Hover yaw correction
     // ════════════════════════════════════════════════════
-    
-    update_hover_state(median_dx, median_dy, dt);
+
+    // Fix 3: pass gyro_z so hover state can estimate IMU bias during stationary hover
+    update_hover_state(median_dx, median_dy, dt, imu_gz_);
     
     result.hover_detected = hover_.is_hovering;
     result.hover_duration = hover_.hover_duration_sec;

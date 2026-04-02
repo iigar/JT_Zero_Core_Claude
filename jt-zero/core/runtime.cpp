@@ -312,15 +312,58 @@ void Runtime::sensor_loop() {
             // IMU: every cycle (200 Hz)
             imu_.update();
             state_.imu = imu_.data();
-            
-            // Derive attitude from accelerometer (simplified)
-            state_.roll  = std::atan2(state_.imu.acc_y, state_.imu.acc_z) * 57.2958f;
-            state_.pitch = std::atan2(-state_.imu.acc_x, 
-                           std::sqrt(state_.imu.acc_y * state_.imu.acc_y + 
-                                     state_.imu.acc_z * state_.imu.acc_z)) * 57.2958f;
-            state_.yaw  += state_.imu.gyro_z * (1.0f / HZ) * 57.2958f;
-            if (state_.yaw > 360.0f) state_.yaw -= 360.0f;
-            if (state_.yaw < 0.0f) state_.yaw += 360.0f;
+
+            constexpr float dt_imu = 1.0f / HZ;        // 0.005 s
+            constexpr float RAD2DEG = 57.2957795f;
+            constexpr float DEG2RAD = 0.01745329f;
+
+            float ax = state_.imu.acc_x;
+            float ay = state_.imu.acc_y;
+            float az = state_.imu.acc_z;
+            float gx = state_.imu.gyro_x;  // rad/s
+            float gy = state_.imu.gyro_y;
+            float gz = state_.imu.gyro_z;
+
+            // Fix 2: complementary filter for roll and pitch.
+            // Accelerometer gives accurate DC angle but is noisy on HF.
+            // Gyroscope is accurate on HF but drifts on LF.
+            // CF blends: alpha fraction from gyro integration, (1-alpha) from accel.
+            // alpha=0.98 → gyro dominates short-term, accel corrects long-term drift.
+            constexpr float CF_ALPHA = 0.98f;
+
+            float acc_roll  = std::atan2(ay, az);                                 // rad
+            float acc_pitch = std::atan2(-ax, std::sqrt(ay * ay + az * az));      // rad
+
+            // Persist CF state across cycles (single-threaded T1, static is safe)
+            static float cf_roll_rad  = 0.0f;
+            static float cf_pitch_rad = 0.0f;
+
+            cf_roll_rad  = CF_ALPHA * (cf_roll_rad  + gx * dt_imu) + (1.0f - CF_ALPHA) * acc_roll;
+            cf_pitch_rad = CF_ALPHA * (cf_pitch_rad + gy * dt_imu) + (1.0f - CF_ALPHA) * acc_pitch;
+
+            state_.roll  = cf_roll_rad  * RAD2DEG;
+            state_.pitch = cf_pitch_rad * RAD2DEG;
+
+            // Fix 2 (yaw): gyro-only integration with slow on-ground bias correction.
+            // No magnetometer → yaw drifts, but bias estimated when drone is stationary
+            // (armed=false, all gyros small). BIAS_ALPHA is very slow (~30s settling).
+            static float gyro_z_bias = 0.0f;
+            constexpr float STILL_THRESH = 0.05f;   // rad/s  (~3°/s gate)
+            constexpr float BIAS_ALPHA   = 0.0005f; // EMA coefficient
+            if (!state_.armed &&
+                std::fabs(gz) < STILL_THRESH &&
+                std::fabs(gx) < STILL_THRESH &&
+                std::fabs(gy) < STILL_THRESH) {
+                gyro_z_bias += (gz - gyro_z_bias) * BIAS_ALPHA;
+            }
+            state_.yaw += (gz - gyro_z_bias) * dt_imu * RAD2DEG;
+            if (state_.yaw >  360.0f) state_.yaw -= 360.0f;
+            if (state_.yaw <    0.0f) state_.yaw += 360.0f;
+
+            // Fix 6: accumulate bias-corrected gyro rotation between T6 camera frames.
+            // T1 runs at 200 Hz, T6 at 15 Hz → ~13 samples accumulated per camera frame.
+            // camera_.accumulate_gyro() is thread-safe (mutex inside VisualOdometry).
+            camera_.accumulate_gyro(gx, gy, gz - gyro_z_bias, dt_imu);
             
             // Barometer: every 4th cycle (50 Hz)
             if (cycle % 4 == 0) {
@@ -787,7 +830,12 @@ void Runtime::camera_loop() {
             // Feed altitude and yaw to camera VO for adaptive params + hover correction
             camera_.set_altitude(state_.altitude_agl);
             camera_.set_yaw_hint(state_.yaw * 0.0174533f); // deg to rad
-            
+
+            // Fix 4/1: feed IMU data to VO for Kalman prediction + consistency check.
+            // Must be called BEFORE tick() so the hint is consumed in the same frame.
+            // acc_x/y in m/s² (body frame), gyro_z in rad/s.
+            camera_.set_imu_hint(state_.imu.acc_x, state_.imu.acc_y, state_.imu.gyro_z);
+
             camera_.tick(ground_dist);
             
             // Emit frame event periodically
