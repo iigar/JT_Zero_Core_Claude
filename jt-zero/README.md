@@ -27,8 +27,8 @@ JT-Zero — це **companion computer система** для дронів. Во
 ```bash
 # На Pi через SSH:
 sudo apt update && sudo apt install -y git
-git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
-cd ~/jt-zero && git checkout main15
+git clone https://github.com/iigar/JT_Zero_Core_Claude.git ~/jt-zero
+cd ~/jt-zero
 chmod +x setup.sh && ./setup.sh
 # setup.sh робить ВСЕ: deps, UART, I2C, C++ build, Python venv, systemd, reboot
 ```
@@ -46,16 +46,16 @@ cd ~/jt-zero && git pull && ./update.sh
 
 ### Варіант 1: ZIP з сайту
 
-1. На комп'ютері: `https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip`
-2. `scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/`
-3. На Pi: `unzip JT_Zero_Core-main.zip && mv JT_Zero_Core-main jt-zero && cd jt-zero && ./setup.sh`
+1. На комп'ютері: `https://github.com/iigar/JT_Zero_Core_Claude/archive/refs/heads/main.zip`
+2. `scp ~/Downloads/JT_Zero_Core_Claude-main.zip pi@jtzero.local:~/`
+3. На Pi: `unzip JT_Zero_Core_Claude-main.zip && mv JT_Zero_Core_Claude-main jt-zero && cd jt-zero && ./setup.sh`
 
 ### Варіант 2: USB флешка (без мережі)
 
 1. Скачайте ZIP на флешку
 2. Вставте в Pi через OTG адаптер
 3. `sudo mount /dev/sda1 /mnt && cp /mnt/*.zip ~/ && sudo umount /mnt`
-4. `unzip *.zip && mv JT_Zero_Core-main jt-zero && cd jt-zero && ./setup.sh`
+4. `unzip *.zip && mv JT_Zero_Core_Claude-main jt-zero && cd jt-zero && ./setup.sh`
 
 ---
 

@@ -99,9 +99,8 @@ ssh-keygen -R jtzero.local
 
 ```bash
 sudo apt update && sudo apt install -y git
-git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
+git clone https://github.com/iigar/JT_Zero_Core_Claude.git ~/jt-zero
 cd ~/jt-zero
-git checkout main15
 chmod +x setup.sh
 ./setup.sh
 ```
@@ -135,25 +134,25 @@ sudo systemctl status jtzero
 
 ### На комп'ютері з інтернетом:
 
-1. Скачайте: `https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip`
+1. Скачайте: `https://github.com/iigar/JT_Zero_Core_Claude/archive/refs/heads/main.zip`
 2. Скопіюйте на Pi:
 
 **Windows (PowerShell):**
 ```powershell
-scp $env:USERPROFILE\Downloads\JT_Zero_Core-main.zip pi@jtzero.local:~/
+scp $env:USERPROFILE\Downloads\JT_Zero_Core_Claude-main.zip pi@jtzero.local:~/
 ```
 
 **Mac/Linux:**
 ```bash
-scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/
+scp ~/Downloads/JT_Zero_Core_Claude-main.zip pi@jtzero.local:~/
 ```
 
 ### На Pi:
 
 ```bash
 cd ~
-unzip JT_Zero_Core-main.zip
-mv JT_Zero_Core-main jt-zero
+unzip JT_Zero_Core_Claude-main.zip
+mv JT_Zero_Core_Claude-main jt-zero
 cd ~/jt-zero
 chmod +x setup.sh
 ./setup.sh
@@ -166,9 +165,9 @@ chmod +x setup.sh
 3. На Pi:
 ```bash
 sudo mkdir -p /mnt/usb && sudo mount /dev/sda1 /mnt/usb
-cp /mnt/usb/JT_Zero_Core-main.zip ~/
+cp /mnt/usb/JT_Zero_Core_Claude-main.zip ~/
 sudo umount /mnt/usb
-cd ~ && unzip JT_Zero_Core-main.zip && mv JT_Zero_Core-main jt-zero
+cd ~ && unzip JT_Zero_Core_Claude-main.zip && mv JT_Zero_Core_Claude-main jt-zero
 cd ~/jt-zero && chmod +x setup.sh && ./setup.sh
 ```
 
@@ -197,10 +196,10 @@ git pull
 1. На комп'ютері: скачайте новий ZIP з GitHub
 2. На Pi:
 ```bash
-scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/
+scp ~/Downloads/JT_Zero_Core_Claude-main.zip pi@jtzero.local:~/
 # На Pi:
-cd ~ && unzip -o JT_Zero_Core-main.zip
-rm -rf jt-zero && mv JT_Zero_Core-main jt-zero
+cd ~ && unzip -o JT_Zero_Core_Claude-main.zip
+rm -rf jt-zero && mv JT_Zero_Core_Claude-main jt-zero
 cd ~/jt-zero && ./update.sh
 ```
 

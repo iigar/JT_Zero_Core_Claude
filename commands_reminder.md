@@ -3,8 +3,7 @@
 ## Git — Щоденна робота
 
 ```bash
-# Перемкнутись на потрібну гілку
-git checkout main14
+# Репозиторій: https://github.com/iigar/JT_Zero_Core_Claude (гілка: main)
 
 # Отримати останні зміни
 git pull
@@ -70,33 +69,28 @@ curl -s http://localhost:8001/api/vo | python3 -m json.tool
 curl -s http://localhost:8001/api/system | python3 -m json.tool
 ```
 
-## Перемикання гілок
+## Git — Claude репо
 
 ```bash
-# Emergent створює нові гілки (main13, main14, main15...)
-# Подивитися яка остання:
-git fetch --all
-git branch -r | sort -V
+# Репозиторій: https://github.com/iigar/JT_Zero_Core_Claude
+# Гілка: main (єдина, не треба перемикати)
 
-# Перемкнутися на нову гілку
-git checkout main14    # замінити на потрібну
+# Отримати оновлення від Claude
+cd ~/jt-zero
+git pull origin main
 
-# Якщо гілка не знайдена локально
-git fetch origin
-git checkout -b main14 origin/main14
+# Перевірити поточний стан
+git log --oneline -5
 ```
 
 ## Перша установка (новий Pi)
 
 ```bash
-# Клонувати репозиторій
-git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
-
-# Перемкнутися на робочу гілку
-cd ~/jt-zero
-git checkout main14
+# Клонувати репозиторій (Claude версія з IMU-VO fusion + cyberpunk HUD)
+git clone https://github.com/iigar/JT_Zero_Core_Claude.git ~/jt-zero
 
 # Запустити повну установку (залежності, UART, I2C, systemd)
+cd ~/jt-zero
 chmod +x setup.sh
 ./setup.sh
 
@@ -192,10 +186,9 @@ ssh-keygen -R <IP-Pi>
 ssh pi@jtzero.local
 # Прийняти новий ключ: yes
 
-# Після входу — встановити JT-Zero:
-cd ~/jt-zero || git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
+# Після входу — встановити JT-Zero (Claude версія):
+git clone https://github.com/iigar/JT_Zero_Core_Claude.git ~/jt-zero
 cd ~/jt-zero
-git checkout main15   # або остання гілка
 chmod +x setup.sh && ./setup.sh
 ```
 
@@ -217,16 +210,14 @@ sudo reboot
 ssh pi@jtzero-1.local  # кожен Pi має унікальне ім'я
 ```
 
-## Emergent (розробка)
+## Оновлення після нових змін від Claude
 
 ```bash
-# Зміни робляться на Emergent платформі
-# Після змін: натиснути "Save to Github"
-# Emergent пушить в нову гілку (mainN)
+# Нові покращення від Claude з'являються в main гілці
+# https://github.com/iigar/JT_Zero_Core_Claude
 
-# На Pi після пуша:
-git fetch origin
-git checkout main15   # або яка нова гілка
-git pull
+# На Pi:
+cd ~/jt-zero
+git pull origin main
 ./update.sh
 ```

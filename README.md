@@ -53,8 +53,8 @@
 ## Швидкий старт
 
 ```bash
-# Клонувати
-git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
+# Клонувати (Claude версія — IMU-VO fusion + cyberpunk HUD)
+git clone https://github.com/iigar/JT_Zero_Core_Claude.git ~/jt-zero
 cd ~/jt-zero
 
 # Встановити (deps, UART, build, systemd)
@@ -70,12 +70,12 @@ git pull && ./update.sh
 
 ```bash
 # Завантажте ZIP на будь-який комп'ютер
-# https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip
+# https://github.com/iigar/JT_Zero_Core_Claude/archive/refs/heads/main.zip
 
 # Скопіюйте на Pi
-scp JT_Zero_Core-main.zip pi@jtzero.local:~/
+scp JT_Zero_Core_Claude-main.zip pi@jtzero.local:~/
 ssh pi@jtzero.local
-unzip JT_Zero_Core-main.zip && mv JT_Zero_Core-main jt-zero
+unzip JT_Zero_Core_Claude-main.zip && mv JT_Zero_Core_Claude-main jt-zero
 cd jt-zero && chmod +x setup.sh && ./setup.sh
 ```
 

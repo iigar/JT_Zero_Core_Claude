@@ -99,13 +99,16 @@ git pull
 ### Оновлення з архіву (без GitHub)
 
 ```bash
-# На комп'ютері: скачайте новий ZIP і скопіюйте на Pi через SCP
-scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/
+# Завантажте ZIP з Claude репо:
+# https://github.com/iigar/JT_Zero_Core_Claude/archive/refs/heads/main.zip
+
+# На комп'ютері: скопіюйте на Pi через SCP
+scp ~/Downloads/JT_Zero_Core_Claude-main.zip pi@jtzero.local:~/
 
 # На Pi:
 cd ~
-unzip -o JT_Zero_Core-main.zip
-rm -rf jt-zero && mv JT_Zero_Core-main jt-zero
+unzip -o JT_Zero_Core_Claude-main.zip
+rm -rf jt-zero && mv JT_Zero_Core_Claude-main jt-zero
 cd ~/jt-zero && ./update.sh
 ```
 
