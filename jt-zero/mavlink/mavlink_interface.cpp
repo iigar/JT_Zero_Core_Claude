@@ -1175,7 +1175,8 @@ MAVOdometry MAVLinkInterface::build_odometry(
     msg.pitchspeed = state.imu.gyro_y;
     msg.yawspeed   = state.imu.gyro_z;
     // Set quality 0-100 based on VO confidence (not just tracking_quality)
-    msg.quality = vo.valid ? (vo.confidence * 100.0f) : 10.0f;
+    // quality=0 signals EKF3 to ignore this measurement entirely (ArduPilot convention)
+    msg.quality = vo.valid ? static_cast<uint8_t>(vo.confidence * 100.0f) : 0;
     msg.frame_id = 0;       // MAV_FRAME_LOCAL_NED
     msg.child_frame_id = 1; // MAV_FRAME_BODY_FRD
     
@@ -1251,20 +1252,24 @@ void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
     
     uint64_t current = now_us();
     if (current - last_vision_us_ >= 33333) {
-        // Always send VISION_POSITION_ESTIMATE at ~30Hz
-        // ArduPilot requires consistent updates to consider VisOdom "healthy"
-        auto vis_msg = build_vision_position(state, vo);
-        send_vision_position(vis_msg);
-        
-        auto odom_msg = build_odometry(state, vo);
-        send_odometry(odom_msg);
-        
-        if (state.flow.valid) {
-            auto flow_msg = build_optical_flow_rad(state.flow, vo);
-            send_optical_flow_rad(flow_msg);
+        // Send vision at ~30Hz when valid; when invalid, send at 1Hz with quality=0
+        // so EKF3 knows the source is alive but unreliable (avoids cycling start/stop aiding)
+        bool vo_valid = vo.valid;
+        bool should_send = vo_valid || (current - last_vision_us_ >= 1000000);
+        if (should_send) {
+            auto vis_msg = build_vision_position(state, vo);
+            send_vision_position(vis_msg);
+
+            auto odom_msg = build_odometry(state, vo);
+            send_odometry(odom_msg);
+
+            if (state.flow.valid) {
+                auto flow_msg = build_optical_flow_rad(state.flow, vo);
+                send_optical_flow_rad(flow_msg);
+            }
+
+            last_vision_us_ = current;
         }
-        
-        last_vision_us_ = current;
     }
 }
 
