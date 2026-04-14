@@ -33,7 +33,8 @@ void print_banner() {
 }
 
 void print_status(const jtzero::Runtime& rt) {
-    const auto& s = rt.state();
+    // state_snapshot() returns a copy under both mutexes — safe for main thread
+    const auto s = rt.state_snapshot();
     
     std::printf("\n─── System Status ────────────────────────\n");
     std::printf("  Mode:    %-12s  Armed: %s\n", 

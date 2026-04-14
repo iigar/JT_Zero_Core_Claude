@@ -54,9 +54,16 @@ public:
     const MemoryEngine&  memory()   const { return memory_engine_; }
     const OutputEngine&  output()   const { return output_engine_; }
     
-    // Access state
+    // Access state — raw reference (caller must hold sensor_mutex_ + slow_mutex_)
     const SystemState& state() const { return state_; }
     SystemState& state() { return state_; }
+
+    // Thread-safe snapshot — returns a copy under both mutexes (canonical order)
+    SystemState state_snapshot() const {
+        std::lock_guard<std::mutex> lk_b(sensor_mutex_);
+        std::lock_guard<std::mutex> lk_c(slow_mutex_);
+        return state_;
+    }
     
     // Access sensors
     IMUSensor&          imu()   { return imu_; }
