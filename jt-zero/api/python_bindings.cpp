@@ -11,6 +11,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
+#include <mutex>
 
 #include "jt_zero/runtime.h"
 
@@ -398,9 +399,14 @@ PYBIND11_MODULE(jtzero_native, m) {
         })
         
         // Data access (returns Python dicts for JSON serialization)
-        .def("get_state", [](const jtzero::Runtime& self) {
-            return state_to_dict(self.state());
-        }, "Get full system state as dict")
+        .def("get_state", [](jtzero::Runtime& self) {
+            jtzero::SystemState snap;
+            {
+                std::lock_guard<std::mutex> lk(self.sensor_mutex());
+                snap = self.state();
+            }
+            return state_to_dict(snap);
+        }, "Get full system state as dict (snapshot copy under sensor_mutex_)")
         
         .def("get_threads", [](const jtzero::Runtime& self) {
             return thread_stats_to_list(self);
