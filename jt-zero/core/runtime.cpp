@@ -10,6 +10,26 @@
 
 namespace jtzero {
 
+// ─── Safety Snapshot Helpers ─────────────────────────────
+
+void Runtime::update_safety_snapshot() noexcept {
+    // Pack SafetySnapshot into uint64_t for atomic store.
+    // Called after every write to state_.range, state_.armed, or state_.flight_mode.
+    SafetySnapshot snap;
+    snap.range_distance = state_.range.distance;
+    snap.range_valid    = state_.range.valid;
+    snap._pad[0] = snap._pad[1] = snap._pad[2] = 0;
+    uint64_t packed;
+    std::memcpy(&packed, &snap, sizeof(packed));
+    safety_snapshot_.store(packed, std::memory_order_release);
+}
+
+static SafetySnapshot ss_decode(uint64_t raw) noexcept {
+    SafetySnapshot s;
+    std::memcpy(&s, &raw, sizeof(s));
+    return s;
+}
+
 Runtime::Runtime() = default;
 
 Runtime::~Runtime() {
@@ -182,32 +202,41 @@ bool Runtime::send_command(const char* cmd, float param1, float param2) {
     e.data[1] = param2;
     e.set_message(cmd);
     
-    // Parse command
-    if (std::strcmp(cmd, "arm") == 0) {
-        e.type = EventType::FLIGHT_ARM;
-        state_.armed = true;
-        state_.flight_mode = FlightMode::ARMED;
-    } else if (std::strcmp(cmd, "disarm") == 0) {
-        e.type = EventType::FLIGHT_DISARM;
-        state_.armed = false;
-        state_.flight_mode = FlightMode::IDLE;
-    } else if (std::strcmp(cmd, "takeoff") == 0) {
-        e.type = EventType::FLIGHT_TAKEOFF;
-        state_.flight_mode = FlightMode::TAKEOFF;
-    } else if (std::strcmp(cmd, "land") == 0) {
-        e.type = EventType::FLIGHT_LAND;
-        state_.flight_mode = FlightMode::LAND;
-    } else if (std::strcmp(cmd, "rtl") == 0) {
-        e.type = EventType::FLIGHT_RTL;
-        state_.flight_mode = FlightMode::RTL;
-    } else if (std::strcmp(cmd, "hold") == 0) {
-        e.type = EventType::FLIGHT_HOLD;
-        state_.flight_mode = FlightMode::HOVER;
-    } else if (std::strcmp(cmd, "vo_reset") == 0) {
-        camera_.reset_vo();
-        e.set_message("VO origin reset (SET HOMEPOINT)");
+    // Parse command — state writes under slow_mutex_, emit outside the lock
+    {
+        std::lock_guard<std::mutex> lk(slow_mutex_);
+        if (std::strcmp(cmd, "arm") == 0) {
+            e.type = EventType::FLIGHT_ARM;
+            state_.armed = true;
+            state_.flight_mode = FlightMode::ARMED;
+            update_safety_snapshot();
+        } else if (std::strcmp(cmd, "disarm") == 0) {
+            e.type = EventType::FLIGHT_DISARM;
+            state_.armed = false;
+            state_.flight_mode = FlightMode::IDLE;
+            update_safety_snapshot();
+        } else if (std::strcmp(cmd, "takeoff") == 0) {
+            e.type = EventType::FLIGHT_TAKEOFF;
+            state_.flight_mode = FlightMode::TAKEOFF;
+            update_safety_snapshot();
+        } else if (std::strcmp(cmd, "land") == 0) {
+            e.type = EventType::FLIGHT_LAND;
+            state_.flight_mode = FlightMode::LAND;
+            update_safety_snapshot();
+        } else if (std::strcmp(cmd, "rtl") == 0) {
+            e.type = EventType::FLIGHT_RTL;
+            state_.flight_mode = FlightMode::RTL;
+            update_safety_snapshot();
+        } else if (std::strcmp(cmd, "hold") == 0) {
+            e.type = EventType::FLIGHT_HOLD;
+            state_.flight_mode = FlightMode::HOVER;
+            update_safety_snapshot();
+        } else if (std::strcmp(cmd, "vo_reset") == 0) {
+            camera_.reset_vo();
+            e.set_message("VO origin reset (SET HOMEPOINT)");
+        }
     }
-    
+
     return event_engine_.emit(e);
 }
 
@@ -264,26 +293,36 @@ void Runtime::supervisor_loop() {
     while (running_.load(std::memory_order_acquire)) {
         auto start = SteadyClock::now();
         
-        // Update system state
-        state_.uptime_sec = static_cast<uint32_t>(now_sec());
-        state_.event_count = static_cast<uint32_t>(event_engine_.total_events());
-        
-        // Battery simulation (slow drain)
-        state_.battery_voltage -= 0.00001f * sim_config_.battery_drain;
-        if (state_.battery_voltage < 10.0f) state_.battery_voltage = 10.0f;
-        state_.battery_percent = (state_.battery_voltage - 10.0f) / 2.6f * 100.0f;
-        
-        // Simulated CPU temp
-        state_.cpu_temp = 42.0f + static_cast<float>(rand() % 100) / 100.0f;
-        
+        // Update system state (Zone C writes under slow_mutex_)
+        {
+            std::lock_guard<std::mutex> lk(slow_mutex_);
+            state_.uptime_sec = static_cast<uint32_t>(now_sec());
+            state_.event_count = static_cast<uint32_t>(event_engine_.total_events());
+
+            // Battery simulation (slow drain)
+            state_.battery_voltage -= 0.00001f * sim_config_.battery_drain;
+            if (state_.battery_voltage < 10.0f) state_.battery_voltage = 10.0f;
+            state_.battery_percent = (state_.battery_voltage - 10.0f) / 2.6f * 100.0f;
+
+            // Simulated CPU temp
+            state_.cpu_temp = 42.0f + static_cast<float>(rand() % 100) / 100.0f;
+        }
+
         // Flight physics (10 Hz)
         update_flight_physics(0.1f);
         
         // Emit heartbeat
         event_engine_.emit(EventType::SYSTEM_HEARTBEAT, 50, "heartbeat");
         
-        // Record telemetry
-        memory_engine_.record_telemetry(state_);
+        // Record telemetry — snapshot under sensor_mutex_ for consistent read
+        {
+            SystemState telem_snap;
+            {
+                std::lock_guard<std::mutex> lk(sensor_mutex_);
+                telem_snap = state_;
+            }
+            memory_engine_.record_telemetry(telem_snap);
+        }
         
         // Process outputs
         output_engine_.process_pending();
@@ -309,6 +348,7 @@ void Runtime::sensor_loop() {
         bool fc_active = !simulator_mode_ && mavlink_.has_fc_data();
         
         if (!fc_active) {
+            sensor_seq_.fetch_add(1, std::memory_order_release);
             // IMU: every cycle (200 Hz)
             imu_.update();
             state_.imu = imu_.data();
@@ -377,12 +417,14 @@ void Runtime::sensor_loop() {
                 gps_sensor_.update();
                 state_.gps = gps_sensor_.data();
             }
+            sensor_seq_.fetch_add(1, std::memory_order_release);
         }
-        
+
         // Rangefinder: every 4th cycle (50 Hz) — keep even with FC (no rangefinder msg)
         if (cycle % 4 == 1) {
             range_.update();
             state_.range = range_.data();
+            update_safety_snapshot();
         }
         
         // Optical Flow: every 4th cycle (50 Hz) — keep even with FC
@@ -444,14 +486,15 @@ void Runtime::reflex_loop() {
         
         // Reflex engine processes events inline in event_loop
         // This thread handles time-based reflexes
-        
-        // Check for obstacle proximity
-        if (state_.range.valid && state_.range.distance < 0.5f) {
+
+        // Check for obstacle proximity — read ONLY from atomic safety snapshot (no mutex)
+        SafetySnapshot snap = ss_decode(safety_snapshot_.load(std::memory_order_acquire));
+        if (snap.range_valid && snap.range_distance < 0.5f) {
             Event e;
             e.timestamp_us = now_us();
             e.type = EventType::FLIGHT_OBSTACLE_DETECTED;
             e.priority = 250;
-            e.data[0] = state_.range.distance;
+            e.data[0] = snap.range_distance;
             e.set_message("Obstacle proximity alert!");
             event_engine_.emit(e);
         }
@@ -472,10 +515,19 @@ void Runtime::rule_loop() {
     while (running_.load(std::memory_order_acquire)) {
         auto start = SteadyClock::now();
         
-        // Evaluate behavior rules
-        auto result = rule_engine_.evaluate(state_);
+        // Evaluate behavior rules — snapshot under sensor_mutex_ for consistent read
+        SystemState snap;
+        {
+            std::lock_guard<std::mutex> lk(sensor_mutex_);
+            snap = state_;
+        }
+        auto result = rule_engine_.evaluate(snap);
         if (result.action != RuleAction::NONE) {
+            // execute() writes state_.armed / state_.flight_mode — guard with slow_mutex_
+            // rule_engine_.execute() does NOT acquire sensor_mutex_ or slow_mutex_ internally
+            std::lock_guard<std::mutex> lk(slow_mutex_);
             rule_engine_.execute(result, state_, event_engine_);
+            update_safety_snapshot();
         }
         
         auto end = SteadyClock::now();
@@ -498,9 +550,10 @@ void Runtime::setup_default_reflexes() {
     emergency_stop.condition = [](const Event&, const SystemState& state) {
         return state.armed;
     };
-    emergency_stop.action = [](const Event&, SystemState& state, EventEngine& events) {
+    emergency_stop.action = [this](const Event&, SystemState& state, EventEngine& events) {
         state.flight_mode = FlightMode::EMERGENCY;
         state.armed = false;
+        update_safety_snapshot();
         events.emit(EventType::FLIGHT_DISARM, 255, "EMERGENCY STOP");
     };
     reflex_engine_.add_rule(emergency_stop);
@@ -540,7 +593,8 @@ void Runtime::setup_default_reflexes() {
 
 void Runtime::update_flight_physics(float dt) {
     if (!simulator_mode_) return;
-    
+
+    std::lock_guard<std::mutex> lk(slow_mutex_);
     auto& s = state_;
     const auto& cfg = sim_config_;
     
@@ -599,6 +653,7 @@ void Runtime::update_flight_physics(float dt) {
                 s.flight_mode = FlightMode::IDLE;
                 s.vx = s.vy = s.vz = 0.0f;
                 s.motor[0] = s.motor[1] = s.motor[2] = s.motor[3] = 0.0f;
+                update_safety_snapshot();
                 event_engine_.emit(EventType::FLIGHT_DISARM, 200, "Landed and disarmed");
                 return;
             }
@@ -666,6 +721,8 @@ void Runtime::update_flight_physics(float dt) {
     // Update rangefinder
     s.range.distance = s.altitude_agl;
     s.range.valid = s.altitude_agl < 40.0f;
+    // range was written inside slow_mutex_ scope; update atomic snapshot too
+    update_safety_snapshot();
 }
 
 void Runtime::setup_default_rules() {
@@ -735,6 +792,7 @@ void Runtime::mavlink_loop() {
         
         // If FC telemetry is available, feed it into system state
         if (mavlink_.has_fc_data() && !simulator_mode_) {
+            std::lock_guard<std::mutex> lk(sensor_mutex_);
             FCTelemetry fc = mavlink_.get_fc_telemetry();
             
             // Attitude from FC (rad → degrees)
@@ -799,8 +857,9 @@ void Runtime::mavlink_loop() {
             } else if (!fc.armed && state_.flight_mode == FlightMode::ARMED) {
                 state_.flight_mode = FlightMode::IDLE;
             }
+            update_safety_snapshot();
         }
-        
+
         // Emit MAVLink heartbeat event periodically
         if (thread_stats_[5].loop_count.load(std::memory_order_relaxed) % 50 == 0) {
             event_engine_.emit(EventType::MAVLINK_HEARTBEAT, 30, "MAVLink heartbeat");
@@ -824,17 +883,29 @@ void Runtime::camera_loop() {
     while (running_.load(std::memory_order_acquire)) {
         auto start = SteadyClock::now();
         
-        float ground_dist = state_.range.valid ? state_.range.distance : 1.0f;
-        
+        // Zone A: read range from atomic snapshot (no mutex needed)
+        SafetySnapshot snap_a = ss_decode(safety_snapshot_.load(std::memory_order_acquire));
+        float ground_dist = snap_a.range_valid ? snap_a.range_distance : 1.0f;
+
         if (camera_.is_running()) {
+            // Zone B: read IMU/attitude/altitude under sensor_mutex_
+            float cam_altitude, cam_yaw, cam_acc_x, cam_acc_y, cam_gyro_z;
+            {
+                std::lock_guard<std::mutex> lk(sensor_mutex_);
+                cam_altitude = state_.altitude_agl;
+                cam_yaw      = state_.yaw;
+                cam_acc_x    = state_.imu.acc_x;
+                cam_acc_y    = state_.imu.acc_y;
+                cam_gyro_z   = state_.imu.gyro_z;
+            }
             // Feed altitude and yaw to camera VO for adaptive params + hover correction
-            camera_.set_altitude(state_.altitude_agl);
-            camera_.set_yaw_hint(state_.yaw * 0.0174533f); // deg to rad
+            camera_.set_altitude(cam_altitude);
+            camera_.set_yaw_hint(cam_yaw * 0.0174533f); // deg to rad
 
             // Fix 4/1: feed IMU data to VO for Kalman prediction + consistency check.
             // Must be called BEFORE tick() so the hint is consumed in the same frame.
             // acc_x/y in m/s² (body frame), gyro_z in rad/s.
-            camera_.set_imu_hint(state_.imu.acc_x, state_.imu.acc_y, state_.imu.gyro_z);
+            camera_.set_imu_hint(cam_acc_x, cam_acc_y, cam_gyro_z);
 
             camera_.tick(ground_dist);
             
@@ -873,19 +944,25 @@ void Runtime::api_bridge_loop() {
         // API bridge thread: maintains runtime state consistency
         // for external API consumers (pybind11/FastAPI).
         // Computes derived metrics and aggregates system health.
-        
-        // Update RAM usage estimate
+
+        // Compute derived values outside any lock
         size_t mem = memory_engine_.memory_usage_bytes();
         mem += sizeof(Event) * EventEngine::QUEUE_SIZE;
         mem += sizeof(FrameBuffer) * 2;
-        state_.ram_usage_mb = static_cast<float>(mem) / (1024.0f * 1024.0f);
-        
-        // Aggregate CPU usage from all threads
+        const float ram_mb = static_cast<float>(mem) / (1024.0f * 1024.0f);
+
         double total_cpu = 0;
         for (int i = 0; i < NUM_THREADS; ++i) {
             total_cpu += thread_stats_[i].cpu_percent.load(std::memory_order_relaxed);
         }
-        state_.cpu_usage = static_cast<float>(total_cpu);
+        const float cpu_usage = static_cast<float>(total_cpu);
+
+        // Write derived metrics under sensor_mutex_ snapshot
+        {
+            std::lock_guard<std::mutex> lk(sensor_mutex_);
+            state_.ram_usage_mb = ram_mb;
+            state_.cpu_usage    = cpu_usage;
+        }
         
         auto end = SteadyClock::now();
         update_thread_stats(7, start, end, HZ);

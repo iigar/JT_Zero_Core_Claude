@@ -18,8 +18,8 @@ struct ReflexRule {
     uint8_t       min_priority;
     // Returns true if reflex should fire
     bool (*condition)(const Event& event, const SystemState& state);
-    // Executes the reflex action
-    void (*action)(const Event& event, SystemState& state, EventEngine& events);
+    // Executes the reflex action (std::function to allow capturing lambdas)
+    std::function<void(const Event&, SystemState&, EventEngine&)> action;
     bool enabled{true};
     uint64_t fire_count{0};
     uint64_t last_fire_us{0};
