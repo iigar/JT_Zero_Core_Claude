@@ -70,6 +70,16 @@ if [ "$NEED_CMAKE" = true ]; then
     cmake -DCMAKE_BUILD_TYPE=Release .. 2>&1 | tail -5
 fi
 
+# Якщо cache містить TSan або Debug флаги — примусовий перебілд у Release.
+# TSan .so не може бути завантажений Python сервісом (libtsan.so.2 залежність).
+if grep -q "fsanitize=thread\|CMAKE_BUILD_TYPE:STRING=RelWithDebInfo\|CMAKE_BUILD_TYPE:STRING=Debug" CMakeCache.txt 2>/dev/null; then
+    echo -e "  ${YELLOW}Виявлено TSan/Debug в cmake cache — скидаю до Release...${NC}"
+    rm -rf *
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_FLAGS="" \
+          -DCMAKE_EXE_LINKER_FLAGS="" .. 2>&1 | tail -5
+fi
+
 make -j"$JOBS" 2>&1 | tail -5
 
 # ─── [3/5] Копіювання .so ───────────────────────────────────
