@@ -314,11 +314,12 @@ void Runtime::supervisor_loop() {
         // Emit heartbeat
         event_engine_.emit(EventType::SYSTEM_HEARTBEAT, 50, "heartbeat");
         
-        // Record telemetry — snapshot under sensor_mutex_ for consistent read
+        // Record telemetry — snapshot under both mutexes (sensor→slow, canonical order)
         {
             SystemState telem_snap;
             {
-                std::lock_guard<std::mutex> lk(sensor_mutex_);
+                std::lock_guard<std::mutex> lk_b(sensor_mutex_);
+                std::lock_guard<std::mutex> lk_c(slow_mutex_);
                 telem_snap = state_;
             }
             memory_engine_.record_telemetry(telem_snap);
@@ -348,6 +349,7 @@ void Runtime::sensor_loop() {
         bool fc_active = !simulator_mode_ && mavlink_.has_fc_data();
         
         if (!fc_active) {
+            std::lock_guard<std::mutex> lk(sensor_mutex_);  // guards all Zone B writes
             sensor_seq_.fetch_add(1, std::memory_order_release);
             // IMU: every cycle (200 Hz)
             imu_.update();
@@ -515,10 +517,12 @@ void Runtime::rule_loop() {
     while (running_.load(std::memory_order_acquire)) {
         auto start = SteadyClock::now();
         
-        // Evaluate behavior rules — snapshot under sensor_mutex_ for consistent read
+        // Evaluate behavior rules — snapshot under BOTH mutexes (sensor→slow, canonical order)
+        // sensor_mutex_ covers Zone B (IMU/baro/gps), slow_mutex_ covers Zone C (battery/uptime)
         SystemState snap;
         {
-            std::lock_guard<std::mutex> lk(sensor_mutex_);
+            std::lock_guard<std::mutex> lk_b(sensor_mutex_);
+            std::lock_guard<std::mutex> lk_c(slow_mutex_);
             snap = state_;
         }
         auto result = rule_engine_.evaluate(snap);
@@ -787,8 +791,14 @@ void Runtime::mavlink_loop() {
         VOResult vo = camera_.last_vo_result();
         
         // MAVLink tick: sends heartbeat, vision position, odometry, optical flow
-        // Also calls process_incoming() which parses FC responses
-        mavlink_.tick(state_, vo);
+        // Snapshot state_ before tick — mavlink_.tick() reads many fields (race vs T0/T1 writes)
+        SystemState mavlink_snap;
+        {
+            std::lock_guard<std::mutex> lk_b(sensor_mutex_);
+            std::lock_guard<std::mutex> lk_c(slow_mutex_);
+            mavlink_snap = state_;
+        }
+        mavlink_.tick(mavlink_snap, vo);
         
         // If FC telemetry is available, feed it into system state
         if (mavlink_.has_fc_data() && !simulator_mode_) {
