@@ -9,6 +9,7 @@ namespace jtzero {
 EventEngine::EventEngine() = default;
 
 bool EventEngine::emit(const Event& event) {
+    std::lock_guard<std::mutex> lk(emit_mutex_);
     if (queue_.push(event)) {
         total_events_.fetch_add(1, std::memory_order_relaxed);
         return true;

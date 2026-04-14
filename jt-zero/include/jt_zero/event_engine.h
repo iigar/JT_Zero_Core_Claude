@@ -4,6 +4,7 @@
  * Lock-free event queue with priority dispatch
  */
 
+#include <mutex>
 #include "jt_zero/common.h"
 
 namespace jtzero {
@@ -35,6 +36,10 @@ public:
     void reset_stats();
     
 private:
+    // Lock ordering: emit_mutex_ is ALWAYS the last lock acquired.
+    // Never acquire sensor_mutex_ or slow_mutex_ while holding emit_mutex_.
+    mutable std::mutex emit_mutex_;
+
     RingBuffer<Event, QUEUE_SIZE> queue_;
     std::atomic<uint64_t> total_events_{0};
     std::atomic<uint64_t> dropped_events_{0};
