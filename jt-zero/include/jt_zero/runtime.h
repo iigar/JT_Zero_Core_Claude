@@ -17,8 +17,18 @@
 
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 namespace jtzero {
+
+// Atomic snapshot of safety-critical fields for T3 (200 Hz, priority 98).
+// Packed into 8 bytes so std::atomic<SafetySnapshot> is lock-free on ARM64.
+struct SafetySnapshot {
+    float   range_distance;  // meters
+    bool    range_valid;
+    uint8_t _pad[3];         // explicit padding to 8 bytes
+};
+static_assert(sizeof(SafetySnapshot) == 8, "SafetySnapshot must be 8 bytes for lock-free atomic");
 
 class Runtime {
 public:
@@ -92,7 +102,10 @@ public:
     // Simulator config (tuneable)
     SimulatorConfig& sim_config() { return sim_config_; }
     const SimulatorConfig& sim_config() const { return sim_config_; }
-    
+
+    // Synchronization accessors (needed by python_bindings.cpp)
+    std::mutex& sensor_mutex() noexcept { return sensor_mutex_; }
+
 private:
     // Engines
     EventEngine   event_engine_;
@@ -168,6 +181,16 @@ private:
     
     // Helper: update thread stats
     void update_thread_stats(int id, TimePoint start, TimePoint end, int target_hz);
+
+    // --- Thread synchronization (added for data-race elimination) ---
+    std::atomic<uint64_t>        safety_snapshot_{0};  // packed SafetySnapshot
+    std::atomic<uint32_t>        sensor_seq_{0};        // seqlock sequence for T1 sensor writes
+    mutable std::mutex           sensor_mutex_;          // Zone B: IMU/baro/GPS writes (T1, T5)
+    mutable std::mutex           slow_mutex_;            // Zone C: battery/motor/flight_mode (T0)
+    mutable std::mutex           motor_mutex_;           // Zone D: motor[] writes
+
+    // Helper: atomically update the safety snapshot (implemented in runtime.cpp)
+    void update_safety_snapshot() noexcept;
 };
 
 } // namespace jtzero
