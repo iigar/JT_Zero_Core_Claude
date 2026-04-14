@@ -471,10 +471,16 @@ void Runtime::event_loop() {
         while (event_engine_.poll(event) && count < 10) {
             // Record in memory
             memory_engine_.record_event(event);
-            
-            // Forward to reflex engine
-            reflex_engine_.process(event, state_, event_engine_);
-            
+
+            // Reflex lambdas read AND write state_ (armed, flight_mode, battery_percent).
+            // Guard with dual lock (canonical: sensor → slow). emit_mutex_ can be acquired
+            // inside reflex actions — canonical order sensor → slow → emit holds.
+            {
+                std::lock_guard<std::mutex> lk_b(sensor_mutex_);
+                std::lock_guard<std::mutex> lk_c(slow_mutex_);
+                reflex_engine_.process(event, state_, event_engine_);
+            }
+
             count++;
         }
         
