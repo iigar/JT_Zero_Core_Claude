@@ -96,57 +96,110 @@ public:
 };
 
 // ─── Fixed Memory Pool (Lock-Free Free-List) ─────────────
-// O(1) allocate/deallocate, thread-safe via atomic CAS
+// O(1) allocate/deallocate, thread-safe via atomic CAS.
+//
+// ABA prevention: free_head_ packs a 32-bit block index and a 32-bit
+// generation counter into one atomic<uint64_t>.  Every successful CAS
+// increments the generation, so a recycled block pointer is never
+// indistinguishable from the original — the ABA scenario is impossible.
+//
+// Layout of the packed uint64_t (little-endian view):
+//   bits 63-32  generation counter (increments on every allocate CAS)
+//   bits 31- 0  block index  (INVALID_IDX == UINT32_MAX means empty)
 template<typename T, size_t PoolSize>
 class MemoryPool {
+    static_assert(std::atomic<uint64_t>::is_always_lock_free,
+                  "uint64_t atomic must be lock-free on this platform");
+
+    static constexpr uint32_t INVALID_IDX = UINT32_MAX;
+
+    // TaggedHead — the logical type stored inside free_head_.
+    struct TaggedHead {
+        uint32_t index; // block index, or INVALID_IDX when list is empty
+        uint32_t gen;   // generation counter, wraps around safely
+    };
+
+    static uint64_t pack(TaggedHead h) noexcept {
+        return (static_cast<uint64_t>(h.gen) << 32) | h.index;
+    }
+
+    static TaggedHead unpack(uint64_t raw) noexcept {
+        return {static_cast<uint32_t>(raw & 0xFFFF'FFFFu),
+                static_cast<uint32_t>(raw >> 32)};
+    }
+
     struct Block {
-        T data;
-        alignas(64) std::atomic<int32_t> next{-1}; // index of next free block
+        T        data;
+        uint32_t next{INVALID_IDX}; // plain — only read while block is off
+                                    // the free list (owner holds it), or
+                                    // during the constructor
     };
 
     std::array<Block, PoolSize> pool_{};
-    alignas(64) std::atomic<int32_t> free_head_{0}; // head of free list
+    alignas(64) std::atomic<uint64_t> free_head_; // packed TaggedHead
     std::atomic<size_t> alloc_count_{0};
 
 public:
     MemoryPool() {
-        // Initialize free list: 0 -> 1 -> 2 -> ... -> PoolSize-1 -> -1
+        // Initialize free list: 0 -> 1 -> 2 -> ... -> PoolSize-1 -> INVALID
         for (size_t i = 0; i < PoolSize - 1; ++i) {
-            pool_[i].next.store(static_cast<int32_t>(i + 1), std::memory_order_relaxed);
+            pool_[i].next = static_cast<uint32_t>(i + 1);
         }
-        pool_[PoolSize - 1].next.store(-1, std::memory_order_relaxed);
+        pool_[PoolSize - 1].next = INVALID_IDX;
+        // Head starts at index 0, generation 0
+        free_head_.store(pack({0u, 0u}), std::memory_order_relaxed);
     }
 
     T* allocate() noexcept {
-        int32_t head = free_head_.load(std::memory_order_acquire);
-        while (head >= 0) {
-            int32_t next = pool_[head].next.load(std::memory_order_relaxed);
-            if (free_head_.compare_exchange_weak(head, next,
-                    std::memory_order_acq_rel, std::memory_order_acquire)) {
+        uint64_t old_raw = free_head_.load(std::memory_order_acquire);
+        while (true) {
+            TaggedHead old = unpack(old_raw);
+            if (old.index == INVALID_IDX) return nullptr; // Pool exhausted
+
+            // Safe to read next: this block is at the head of the free list
+            // and we have a snapshot of old.index.  Another thread may also
+            // be reading pool_[old.index].next concurrently, but both are
+            // reads — no data race.  If the CAS below fails, old_raw is
+            // refreshed by compare_exchange_weak (failure path).
+            uint32_t next = pool_[old.index].next;
+
+            // Increment generation to defeat ABA: even if old.index is
+            // freed and re-linked before our CAS, the generation will differ.
+            TaggedHead new_head{next, old.gen + 1};
+            if (free_head_.compare_exchange_weak(old_raw, pack(new_head),
+                    std::memory_order_release,
+                    std::memory_order_acquire)) {
                 alloc_count_.fetch_add(1, std::memory_order_relaxed);
-                return &pool_[head].data;
+                return &pool_[old.index].data;
             }
-            // CAS failed, head was updated by another thread, retry
+            // CAS failed — old_raw was refreshed; retry with new snapshot
         }
-        return nullptr; // Pool exhausted
     }
 
     void deallocate(T* ptr) noexcept {
-        // Find block index from pointer
-        auto* base = reinterpret_cast<char*>(&pool_[0]);
+        // Recover block index from pointer arithmetic
+        auto* base   = reinterpret_cast<char*>(&pool_[0]);
         auto* target = reinterpret_cast<char*>(ptr);
         size_t byte_offset = static_cast<size_t>(target - base);
-        size_t block_size = sizeof(Block);
-        size_t idx = byte_offset / block_size;
-        
-        if (idx >= PoolSize) return; // Invalid pointer
-        
-        int32_t old_head = free_head_.load(std::memory_order_acquire);
-        do {
-            pool_[idx].next.store(old_head, std::memory_order_relaxed);
-        } while (!free_head_.compare_exchange_weak(old_head, static_cast<int32_t>(idx),
-                    std::memory_order_acq_rel, std::memory_order_acquire));
-        
+        size_t idx = byte_offset / sizeof(Block);
+
+        if (idx >= PoolSize) return; // Invalid pointer — silently ignore
+
+        uint64_t old_raw = free_head_.load(std::memory_order_acquire);
+        while (true) {
+            TaggedHead old = unpack(old_raw);
+            // Link this block in front of the current head
+            pool_[idx].next = old.index;
+            // Generation also increments on deallocate to be safe
+            TaggedHead new_head{static_cast<uint32_t>(idx), old.gen + 1};
+            if (free_head_.compare_exchange_weak(old_raw, pack(new_head),
+                    std::memory_order_release,
+                    std::memory_order_acquire)) {
+                break;
+            }
+            // CAS failed — old_raw refreshed; retry
+        }
+
         alloc_count_.fetch_sub(1, std::memory_order_relaxed);
     }
 
