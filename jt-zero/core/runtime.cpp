@@ -202,9 +202,11 @@ bool Runtime::send_command(const char* cmd, float param1, float param2) {
     e.data[1] = param2;
     e.set_message(cmd);
     
-    // Parse command — state writes under slow_mutex_, emit outside the lock
+    // Parse command — dual lock (canonical: sensor → slow) because update_safety_snapshot()
+    // reads state_.range (Zone B, guarded by sensor_mutex_). emit() runs outside the lock.
     {
-        std::lock_guard<std::mutex> lk(slow_mutex_);
+        std::lock_guard<std::mutex> lk_b(sensor_mutex_);
+        std::lock_guard<std::mutex> lk_c(slow_mutex_);
         if (std::strcmp(cmd, "arm") == 0) {
             e.type = EventType::FLIGHT_ARM;
             state_.armed = true;
@@ -422,17 +424,23 @@ void Runtime::sensor_loop() {
             sensor_seq_.fetch_add(1, std::memory_order_release);
         }
 
-        // Rangefinder: every 4th cycle (50 Hz) — keep even with FC (no rangefinder msg)
+        // Rangefinder: every 4th cycle (50 Hz) — hardware read outside lock, state write under sensor_mutex_
         if (cycle % 4 == 1) {
-            range_.update();
-            state_.range = range_.data();
-            update_safety_snapshot();
+            range_.update();          // hardware read — no lock needed
+            {
+                std::lock_guard<std::mutex> lk(sensor_mutex_);
+                state_.range = range_.data();
+                update_safety_snapshot();
+            }
         }
-        
-        // Optical Flow: every 4th cycle (50 Hz) — keep even with FC
+
+        // Optical Flow: every 4th cycle (50 Hz) — hardware read outside lock, state write under sensor_mutex_
         if (cycle % 4 == 2) {
-            flow_.update();
-            state_.flow = flow_.data();
+            flow_.update();           // hardware read — no lock needed
+            {
+                std::lock_guard<std::mutex> lk(sensor_mutex_);
+                state_.flow = flow_.data();
+            }
         }
         
         // Emit sensor events periodically
@@ -527,9 +535,10 @@ void Runtime::rule_loop() {
         }
         auto result = rule_engine_.evaluate(snap);
         if (result.action != RuleAction::NONE) {
-            // execute() writes state_.armed / state_.flight_mode — guard with slow_mutex_
-            // rule_engine_.execute() does NOT acquire sensor_mutex_ or slow_mutex_ internally
-            std::lock_guard<std::mutex> lk(slow_mutex_);
+            // execute() writes state_.armed / state_.flight_mode — canonical dual lock.
+            // update_safety_snapshot() reads state_.range (Zone B) → sensor_mutex_ required.
+            std::lock_guard<std::mutex> lk_b(sensor_mutex_);
+            std::lock_guard<std::mutex> lk_c(slow_mutex_);
             rule_engine_.execute(result, state_, event_engine_);
             update_safety_snapshot();
         }
@@ -598,7 +607,8 @@ void Runtime::setup_default_reflexes() {
 void Runtime::update_flight_physics(float dt) {
     if (!simulator_mode_) return;
 
-    std::lock_guard<std::mutex> lk(slow_mutex_);
+    std::lock_guard<std::mutex> lk_b(sensor_mutex_);  // canonical order: sensor → slow
+    std::lock_guard<std::mutex> lk_c(slow_mutex_);
     auto& s = state_;
     const auto& cfg = sim_config_;
     
