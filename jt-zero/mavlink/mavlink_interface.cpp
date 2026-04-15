@@ -1261,10 +1261,11 @@ void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
     
     uint64_t current = now_us();
     if (current - last_vision_us_ >= 33333) {
-        // Send vision at ~30Hz when valid; when invalid, send at 1Hz with quality=0
-        // so EKF3 knows the source is alive but unreliable (avoids cycling start/stop aiding)
-        bool vo_valid = vo.valid;
-        bool should_send = vo_valid || (current - last_vision_us_ >= 1000000);
+        // Fix 46: Only send when VO is valid. Sending at 1Hz with quality=0 when invalid
+        // CAUSES EKF3 cycling (receives → fails innovation check → "stopped aiding" → repeat).
+        // Stopping completely lets EKF3 time out once and cleanly fall back to IMU-only.
+        // When VO becomes valid again, EKF3 re-acquires on the first valid message.
+        bool should_send = vo.valid;
         if (should_send) {
             auto vis_msg = build_vision_position(state, vo);
             send_vision_position(vis_msg);
