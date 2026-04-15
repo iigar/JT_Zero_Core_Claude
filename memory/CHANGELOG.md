@@ -1,5 +1,32 @@
 # JT-Zero Changelog
 
+## 2026-04-15 — Thread Safety, Git Hygiene, LK IMU Hints Hardware Fix
+
+### Phase 01 — SystemState Thread Safety (Fix #43)
+- **Що:** 8 потоків писали в `SystemState state_` без синхронізації → data races під TSan
+- **Виправлено 5 sites:** range/flow поза sensor_mutex_; update_flight_physics без dual lock; send_command/rule_loop викликали update_safety_snapshot() з неправильним lock; reflex lambdas без lock; main.cpp читав raw state reference
+- **Канонічний порядок mutex:** sensor_mutex_(1) → slow_mutex_(2) → motor_mutex_(3) → emit_mutex_(4)
+- **Додано:** `Runtime::state_snapshot()` — повертає копію під dual lock; `SafetySnapshot` 8-byte atomic struct
+- **Верифіковано:** TSan Run #5 — **0 DATA RACE**, 30с, 8 потоків
+- **CPU:** 6%, RAM: 33MB на Pi Zero 2W ✓
+
+### Git Hygiene
+- **Що:** jt-zero/build/, backend/*.so (cpython-311), .gitconfig випадково потрапили в git
+- **Дія:** `git rm --cached -r` → 77 файлів видалено з tracking
+- **Виправлено .gitignore:** дублювання `*.env` × ~50 (через баг `echo -e` в скрипті), додано `*.so`, `.gitconfig`, `frontend/package-lock.json`
+
+### Fix #45 — LK IMU Hints мертві з реальним FC (hardware verified)
+- **Що:** `accumulate_gyro()` викликалась тільки в `if (!fc_active)` блоці sensor_loop. З підключеним Matek H743 → fc_active=true → preint_.valid завжди false → LK hints ніколи не активувались → TRK: 0-4 при будь-якому yaw
+- **Fix 45a:** додано `else` гілку в sensor_loop — читає gyro з state_.imu (заповнює T5 з MAVLink SCALED_IMU) під sensor_mutex_, передає в accumulate_gyro()
+- **Fix 45b:** ATTITUDE msg (id=30) rollspeed/pitchspeed/yawspeed (rad/s) скопійовані в fc_telem_.gyro_x/y/z → imu_valid=true; ATTITUDE stream: 4Hz → 25Hz (via REQUEST_DATA_STREAM + SET_MESSAGE_INTERVAL)
+- **Верифіковано на залізі:** Pi Zero 2W + Matek H743, Pi Camera v2. Slow/medium yaw (<90°/s): **TRK:176 Q:0.98** (до фіксу: TRK:0-4). Падіння до 0 при дуже різкому flick — очікувана фізика (features виходять за 320px за 66мс)
+- **Файли:** `runtime.cpp:sensor_loop`, `mavlink_interface.cpp:case30`, потоки stream rates
+
+### Оновлено backlog (PRD.md)
+- **Закрито з P1:** "Deploy + verify complementary filter on FC" (✓ виконано Fix 45), "Test LK hint effectiveness" (✓ TRK:176 підтверджено)
+- **Залишилось P1:** flight log test, STATUSTEXT test в Mission Planner
+- **Додано P2:** GPS-loss position_uncertainty warning (RuleEngine, Kalman-based, HOVER-aware)
+
 ## 2026-04-03 — VO+IMU Fusion Overhaul (6 fixes)
 
 ### Fix 36: imu_consistency — правильне ΔV порівняння (`camera_pipeline.cpp`)
@@ -292,3 +319,4 @@ If `rpicam-hello` shows "No cameras available":
 - LK Tracker bilinear interpolation, Sobel 3x3 gradients
 - Shi-Tomasi grid corner detector for thermal
 - Verified on Pi 4 + Caddx thermal: Det:180, Track:16-59, Conf:0.18-0.29
+

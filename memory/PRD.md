@@ -55,20 +55,16 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 ## Backlog
 
 ### P1 - Next
-- Deploy to Pi: `git pull && ./update.sh` — verify complementary filter + IMU prediction on real FC
-- Test LK hint effectiveness: compare `features_tracked` before/after Fix 41 during yaw rotation test
 - Set flight log password via Dashboard → start recording → fly → stop → download & analyze
 - Test STATUSTEXT visibility in Mission Planner during fallback events
 
 ### P2 - Planned
-- C++ thread safety: SystemState data race (8 threads without mutex on state_ members)
-- C++ MemoryPool::allocate() race condition (CAS in free-list may still have ABA issues)
 - C++ native MJPEG support for USBCamera
 - IP camera (RTSP) support
 - Autonomous Mission Planning UI
 - Focal length calibration for USB thermal cameras
+- **GPS-loss position uncertainty warning** — RuleEngine rule: GPS=0 AND position_uncertainty > 4m → STATUSTEXT WARNING; >6m → STATUSTEXT CRITICAL + RTL recommendation. Uses Kalman-derived `pose_var_x_/y_` (Bug Fix #40) — physically correct, does NOT trigger during HOVER (drift minimal when stationary). Much smarter than raw time-based rule.
 
 ### P3 - Future
 - Sensor fusion (dual-camera VO simultaneously)
 - 3D flight replay from encrypted logs
-- Repo hygiene: remove .gitconfig, *.so binary, jt-zero/build/ from git tracking
