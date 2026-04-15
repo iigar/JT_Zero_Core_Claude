@@ -422,6 +422,23 @@ void Runtime::sensor_loop() {
                 state_.gps = gps_sensor_.data();
             }
             sensor_seq_.fetch_add(1, std::memory_order_release);
+        } else {
+            // Fix 45: FC active — MAVLink gyro data (state_.imu) is updated by T5 from
+            // SCALED_IMU, but accumulate_gyro() was never called in this branch.
+            // Result: preint_.valid = false always → LK hints disabled → TRK drops to 0
+            // during yaw maneuvers even though real gyro data is available.
+            // Fix: read gyro from state_.imu (T5-populated) and feed into pre-integrator.
+            // T1 runs at 200 Hz; FC sends SCALED_IMU at ~25-50 Hz → same rate value is
+            // read 4-8× per MAVLink update, but total integral = rate × sum(dt) = correct.
+            constexpr float dt_imu = 1.0f / HZ;
+            float gx, gy, gz;
+            {
+                std::lock_guard<std::mutex> lk(sensor_mutex_);
+                gx = state_.imu.gyro_x;
+                gy = state_.imu.gyro_y;
+                gz = state_.imu.gyro_z;
+            }
+            camera_.accumulate_gyro(gx, gy, gz, dt_imu);
         }
 
         // Rangefinder: every 4th cycle (50 Hz) — hardware read outside lock, state write under sensor_mutex_
