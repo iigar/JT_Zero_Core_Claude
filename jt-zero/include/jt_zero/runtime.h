@@ -191,7 +191,6 @@ private:
 
     // --- Thread synchronization (added for data-race elimination) ---
     std::atomic<uint64_t>        safety_snapshot_{0};  // packed SafetySnapshot
-    std::atomic<uint32_t>        sensor_seq_{0};        // seqlock sequence for T1 sensor writes
     mutable std::mutex           sensor_mutex_;          // Zone B: IMU/baro/GPS writes (T1, T5)
     mutable std::mutex           slow_mutex_;            // Zone C: battery/motor/flight_mode (T0)
     mutable std::mutex           motor_mutex_;           // Zone D: motor[] writes

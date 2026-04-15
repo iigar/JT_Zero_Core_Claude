@@ -352,7 +352,6 @@ void Runtime::sensor_loop() {
         
         if (!fc_active) {
             std::lock_guard<std::mutex> lk(sensor_mutex_);  // guards all Zone B writes
-            sensor_seq_.fetch_add(1, std::memory_order_release);
             // IMU: every cycle (200 Hz)
             imu_.update();
             state_.imu = imu_.data();
@@ -408,20 +407,19 @@ void Runtime::sensor_loop() {
             // T1 runs at 200 Hz, T6 at 15 Hz → ~13 samples accumulated per camera frame.
             // camera_.accumulate_gyro() is thread-safe (mutex inside VisualOdometry).
             camera_.accumulate_gyro(gx, gy, gz - gyro_z_bias, dt_imu);
-            
+
             // Barometer: every 4th cycle (50 Hz)
             if (cycle % 4 == 0) {
                 baro_.update();
                 state_.baro = baro_.data();
                 state_.altitude_agl = state_.baro.altitude;
             }
-            
+
             // GPS: every 20th cycle (10 Hz)
             if (cycle % 20 == 0) {
                 gps_sensor_.update();
                 state_.gps = gps_sensor_.data();
             }
-            sensor_seq_.fetch_add(1, std::memory_order_release);
         } else {
             // Fix 45: FC active — MAVLink gyro data (state_.imu) is updated by T5 from
             // SCALED_IMU, but accumulate_gyro() was never called in this branch.
@@ -835,7 +833,8 @@ void Runtime::mavlink_loop() {
         
         // If FC telemetry is available, feed it into system state
         if (mavlink_.has_fc_data() && !simulator_mode_) {
-            std::lock_guard<std::mutex> lk(sensor_mutex_);
+            std::lock_guard<std::mutex> lk_b(sensor_mutex_);  // Zone B: attitude, imu, baro, gps, altitude, vx
+            std::lock_guard<std::mutex> lk_c(slow_mutex_);    // Zone C: battery_voltage/percent, armed, flight_mode
             FCTelemetry fc = mavlink_.get_fc_telemetry();
             
             // Attitude from FC (rad → degrees)
