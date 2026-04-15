@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -flto -Wl,--gc-sections "CMakeFiles/jt-zero.dir/main.cpp.o" -o jt-zero  libjtzero_core.a -lpthread 

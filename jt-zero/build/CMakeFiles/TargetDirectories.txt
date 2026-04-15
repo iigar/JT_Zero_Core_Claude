@@ -1,9 +1,0 @@
-/app/jt-zero/build/CMakeFiles/jtzero_core.dir
-/app/jt-zero/build/CMakeFiles/jt-zero.dir
-/app/jt-zero/build/CMakeFiles/jtzero_native.dir
-/app/jt-zero/build/CMakeFiles/edit_cache.dir
-/app/jt-zero/build/CMakeFiles/rebuild_cache.dir
-/app/jt-zero/build/CMakeFiles/list_install_components.dir
-/app/jt-zero/build/CMakeFiles/install.dir
-/app/jt-zero/build/CMakeFiles/install/local.dir
-/app/jt-zero/build/CMakeFiles/install/strip.dir

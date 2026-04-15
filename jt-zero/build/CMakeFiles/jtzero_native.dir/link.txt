@@ -1,1 +1,0 @@
-/usr/bin/c++ -fPIC -O3 -DNDEBUG -flto -Wl,--gc-sections -flto=auto -shared  -o jtzero_native.cpython-311-aarch64-linux-gnu.so CMakeFiles/jtzero_native.dir/api/python_bindings.cpp.o  libjtzero_core.a -lpthread 
