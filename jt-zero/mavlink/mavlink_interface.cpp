@@ -638,7 +638,7 @@ void MAVLinkInterface::request_data_streams() {
         { 1,  2 },  // RAW_SENSORS (SCALED_IMU, SCALED_PRESSURE)
         { 2,  2 },  // EXTENDED_STATUS (SYS_STATUS)
         { 6,  2 },  // POSITION (GLOBAL_POSITION_INT, GPS_RAW_INT)
-        { 10, 4 },  // EXTRA1 (ATTITUDE)
+        { 10, 25 },  // EXTRA1 (ATTITUDE) — 25 Hz for LK IMU hints (Fix 45b)
         { 11, 2 },  // EXTRA2 (VFR_HUD)
     };
     
@@ -658,7 +658,7 @@ void MAVLinkInterface::request_data_streams() {
     // msg_id=76, CRC_EXTRA=152
     // More reliable: requests specific message IDs at specific intervals
     struct { uint32_t mavlink_msg_id; int32_t interval_us; } intervals[] = {
-        { 30,  250000 },  // ATTITUDE @ 4 Hz
+        { 30,   40000 },  // ATTITUDE @ 25 Hz (Fix 45b: gyro hints for LK tracker)
         { 29,  500000 },  // SCALED_PRESSURE @ 2 Hz
         { 27,  500000 },  // RAW_IMU / SCALED_IMU @ 2 Hz
         { 24,  500000 },  // GPS_RAW_INT @ 2 Hz
@@ -1085,6 +1085,15 @@ void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t
         fc_telem_.pitchspeed = safe_f32(20);
         fc_telem_.yawspeed   = safe_f32(24);
         fc_telem_.attitude_valid = true;
+        // Fix 45b: ATTITUDE angular rates (rad/s) are the same physical quantity as
+        // SCALED_IMU gyro but arrive at 25 Hz vs 2 Hz. Use them for LK IMU hints.
+        // Only update gyro if len covers the rollspeed fields (offset 16-28 = 28 bytes).
+        if (len >= 28) {
+            fc_telem_.gyro_x   = fc_telem_.rollspeed;
+            fc_telem_.gyro_y   = fc_telem_.pitchspeed;
+            fc_telem_.gyro_z   = fc_telem_.yawspeed;
+            fc_telem_.imu_valid = true;
+        }
         break;
     }
     
