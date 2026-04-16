@@ -763,7 +763,7 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     constexpr float alpha = 0.3f;
     running_confidence_ = alpha * raw_confidence + (1.0f - alpha) * running_confidence_;
     
-    bool position_update = running_confidence_ > 0.15f && inlier_count >= adaptive_.min_inliers;
+    bool position_update = running_confidence_ > 0.40f && inlier_count >= adaptive_.min_inliers;
     
     if (position_update) {
         pose_x_ += result.dx;
