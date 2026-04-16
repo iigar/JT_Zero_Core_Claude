@@ -193,6 +193,33 @@ if [ -n "$CONFIG_FILE" ]; then
     else
         skip "Serial console вже вимкнено"
     fi
+
+    # --- Hardware Watchdog ---
+    # Якщо Pi зависне повністю (kernel panic, deadlock), hardware watchdog
+    # примусово перезавантажить систему. Критично для безпілотника.
+    if ! grep -q "^dtparam=watchdog=on" "$CONFIG_FILE" 2>/dev/null; then
+        echo "dtparam=watchdog=on" | sudo tee -a "$CONFIG_FILE" > /dev/null
+        ok "Hardware watchdog увімкнено (/dev/watchdog)"
+        NEEDS_REBOOT=true
+    else
+        skip "Hardware watchdog вже увімкнено"
+    fi
+fi
+
+# Встановити watchdog daemon (пінгує /dev/watchdog щоб Pi не перезавантажувався)
+if ! command -v watchdog &> /dev/null; then
+    info "Встановлення watchdog daemon..."
+    sudo apt-get install -y watchdog >> "$LOG_FILE" 2>&1
+    # Мінімальний конфіг: пінг /dev/watchdog кожні 10с, reboot якщо не відповідає 60с
+    sudo tee /etc/watchdog.conf > /dev/null << 'WDEOF'
+watchdog-device = /dev/watchdog
+watchdog-timeout = 15
+interval = 5
+WDEOF
+    sudo systemctl enable watchdog >> "$LOG_FILE" 2>&1
+    ok "Watchdog daemon встановлено та увімкнено"
+else
+    skip "Watchdog daemon вже встановлено"
 fi
 
 # ════════════════════════════════════════════════════════════
@@ -297,7 +324,7 @@ StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
-Type=simple
+Type=notify
 User=$CURRENT_USER
 WorkingDirectory=$BACKEND_DIR
 Environment=PYTHONPATH=$JT_DIR
@@ -306,6 +333,11 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+
+# Watchdog: якщо сервіс не пінгує systemd протягом 30с — він завис → перезапуск
+# server.py пінгує через NOTIFY_SOCKET кожні ~10с з _vo_fallback_monitor
+WatchdogSec=30
+NotifyAccess=main
 
 [Install]
 WantedBy=multi-user.target

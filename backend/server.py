@@ -10,6 +10,7 @@ import asyncio
 import time
 import struct
 import zlib
+import socket
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -66,6 +67,27 @@ async def lifespan(app: FastAPI):
 flight_logger = FlightLogger()
 
 
+def _sd_watchdog_ping():
+    """Ping systemd watchdog via NOTIFY_SOCKET.
+
+    systemd sets WatchdogSec=30 in jtzero.service.
+    If this ping stops arriving, systemd assumes the process is hung and restarts it.
+    No external dependencies — uses only stdlib socket.
+    Safe to call even if not running under systemd (NOTIFY_SOCKET will be absent).
+    """
+    notify_socket = os.environ.get("NOTIFY_SOCKET")
+    if not notify_socket:
+        return
+    try:
+        addr = notify_socket
+        if addr.startswith("@"):
+            addr = "\0" + addr[1:]  # abstract unix socket
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.sendto(b"WATCHDOG=1", addr)
+    except Exception:
+        pass  # not running under systemd — silently ignore
+
+
 async def _vo_fallback_monitor():
     """Background task: monitors CSI confidence and manages VO fallback to thermal.
     Runs independently of WebSocket connections at ~10Hz.
@@ -81,6 +103,11 @@ async def _vo_fallback_monitor():
             # GPS-loss warning (1Hz — no need to check every 100ms)
             if tick_count % 10 == 0 and hasattr(runtime, 'gps_warn_tick'):
                 runtime.gps_warn_tick()
+
+            # Systemd watchdog ping (every 10s — WatchdogSec=30 in jtzero.service)
+            # If this loop hangs, ping stops → systemd restarts the service
+            if tick_count % 100 == 0:
+                _sd_watchdog_ping()
 
             # Flight log recording (if active)
             if flight_logger.is_recording:
@@ -105,6 +132,12 @@ async def _vo_fallback_monitor():
                     print(f"[VO Monitor] stats error: {e2}", flush=True)
         except Exception as e:
             print(f"[VO Monitor] tick error: {e}", flush=True)
+            # Notify FC that Python monitor is degraded — visible in Mission Planner
+            try:
+                if hasattr(runtime, '_send_statustext'):
+                    runtime._send_statustext(3, "JT0: MONITOR ERR — VO/GPS WATCH DEGRADED")
+            except Exception:
+                pass
         await asyncio.sleep(0.1)  # 10Hz
 
 app = FastAPI(
