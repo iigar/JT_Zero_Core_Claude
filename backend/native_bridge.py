@@ -124,6 +124,17 @@ class NativeRuntime:
         self._vo_pos_x = 0.0            # accumulated VO position
         self._vo_pos_y = 0.0
         self._vo_pos_z = 0.0
+
+        # ── GPS-loss position uncertainty warning ──
+        # Fires when GPS is degraded and Kalman-derived uncertainty exceeds thresholds.
+        # Uses pose_var_x_/y_ (Fix #40) — physically correct, not ad-hoc time-based.
+        # Does not spam: minimum _GPS_WARN_DEBOUNCE_S between messages.
+        self._GPS_WARN_THRESHOLD_M  = 4.0   # WARNING level (m)
+        self._GPS_WARN_CRITICAL_M   = 8.0   # CRITICAL level (m)
+        self._GPS_WARN_DEBOUNCE_S   = 30.0  # min seconds between STATUSTEXT messages
+        self._GPS_WARN_MIN_FIX      = 3     # fix_type < this → GPS degraded
+        self._gps_warn_last_sent    = 0.0   # timestamp of last warning
+        self._gps_warn_level        = 'ok'  # 'ok' | 'warn' | 'critical'
     
     def start(self):
         if self.running:
@@ -501,6 +512,82 @@ class NativeRuntime:
             else:
                 # Bad probe — reset good probe counter
                 self._vo_csi_good_probes = 0
+
+    def gps_warn_tick(self):
+        """Called periodically (~1Hz from background monitor).
+
+        Watches GPS fix quality and Kalman position_uncertainty.
+        Sends MAVLink STATUSTEXT warnings when:
+          - GPS fix_type < 3 (no 3D fix)  AND  armed
+          - uncertainty > _GPS_WARN_THRESHOLD_M  → WARNING
+          - uncertainty > _GPS_WARN_CRITICAL_M   → CRITICAL
+
+        Uses Kalman covariance-derived uncertainty (Fix #40): physically
+        meaningful, grows with real drift, stays low in hover.
+        Debounced: at most one message per _GPS_WARN_DEBOUNCE_S seconds.
+        """
+        if not self.running:
+            return
+
+        try:
+            state = dict(self._rt.get_state())
+            gps   = state.get('gps', {})
+            armed = state.get('armed', False)
+        except Exception:
+            return
+
+        if not armed:
+            # Not flying — reset warning level silently
+            self._gps_warn_level = 'ok'
+            return
+
+        # GPS is good → reset, no action
+        fix_type = gps.get('fix_type', 0) if isinstance(gps, dict) else 0
+        if fix_type >= self._GPS_WARN_MIN_FIX:
+            if self._gps_warn_level != 'ok':
+                sys.stderr.write(f"[GPS Warn] GPS recovered (fix_type={fix_type})\n")
+                sys.stderr.flush()
+            self._gps_warn_level = 'ok'
+            return
+
+        # GPS degraded — check uncertainty
+        try:
+            cam_stats = self.get_camera_stats()
+            uncertainty = cam_stats.get('vo_position_uncertainty', 0.0)
+        except Exception:
+            return
+
+        now = time.time()
+        debounced = (now - self._gps_warn_last_sent) >= self._GPS_WARN_DEBOUNCE_S
+
+        if uncertainty >= self._GPS_WARN_CRITICAL_M:
+            new_level = 'critical'
+        elif uncertainty >= self._GPS_WARN_THRESHOLD_M:
+            new_level = 'warn'
+        else:
+            new_level = 'ok'
+
+        if new_level == 'ok':
+            self._gps_warn_level = 'ok'
+            return
+
+        if new_level == self._gps_warn_level and not debounced:
+            return  # same level, too soon to repeat
+
+        # Escalation or debounce timeout → send
+        self._gps_warn_level = new_level
+        self._gps_warn_last_sent = now
+
+        if new_level == 'critical':
+            msg = f"JT0: GPS LOST unc={uncertainty:.1f}m RTL ADVISED"
+            severity = 2  # MAV_SEVERITY_CRITICAL
+        else:
+            msg = f"JT0: GPS DEGRADED unc={uncertainty:.1f}m VO only"
+            severity = 4  # MAV_SEVERITY_WARNING
+
+        sys.stderr.write(f"[GPS Warn] {msg} fix={fix_type}\n")
+        sys.stderr.flush()
+        self._send_statustext(severity, msg)
 
     def _vo_inject_loop(self):
         """Background thread: captures thermal JPEG → grayscale → injects to C++ VO."""

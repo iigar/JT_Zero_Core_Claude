@@ -69,19 +69,24 @@ flight_logger = FlightLogger()
 async def _vo_fallback_monitor():
     """Background task: monitors CSI confidence and manages VO fallback to thermal.
     Runs independently of WebSocket connections at ~10Hz.
-    Also records flight log telemetry and point cloud."""
+    Also records flight log telemetry and point cloud.
+    Also monitors GPS-loss position uncertainty and sends STATUSTEXT warnings."""
     await asyncio.sleep(5)  # Let runtime stabilize
     tick_count = 0
     while True:
         try:
             if hasattr(runtime, 'vo_fallback_tick'):
                 runtime.vo_fallback_tick()
-            
+
+            # GPS-loss warning (1Hz — no need to check every 100ms)
+            if tick_count % 10 == 0 and hasattr(runtime, 'gps_warn_tick'):
+                runtime.gps_warn_tick()
+
             # Flight log recording (if active)
             if flight_logger.is_recording:
                 flight_logger.record_telemetry(runtime)
                 flight_logger.record_pointcloud(runtime)
-            
+
             tick_count += 1
             if tick_count % 50 == 0:  # Every 5 seconds
                 try:

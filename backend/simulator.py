@@ -644,6 +644,10 @@ class JTZeroSimulator:
         """VO fallback monitoring — no-op in simulator."""
         pass
 
+    def gps_warn_tick(self):
+        """GPS-loss position uncertainty warning — no-op in simulator."""
+        pass
+
     def get_features(self) -> list:
         """Return simulated VO features for frontend testing."""
         with self._lock:
