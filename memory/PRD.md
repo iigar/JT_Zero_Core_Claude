@@ -51,6 +51,7 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 - Python simulator with simulated features for dev/preview testing
 - Frontend design overhaul: HUD grid, sweep animation, battery meter, cockpit Header
 - Comprehensive documentation (CLAUDE.md, PRD.md, CHANGELOG.md, SYSTEM.md, Worklog.md)
+- **GPS-loss position uncertainty warning** — `gps_warn_tick()` sends MAVLink STATUSTEXT when GPS fix < 3 + Kalman uncertainty > 4m (WARNING) or > 8m (CRITICAL). Debounced 30s. Hover-safe.
 
 ## Backlog
 
@@ -63,7 +64,6 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 - IP camera (RTSP) support
 - Autonomous Mission Planning UI
 - Focal length calibration for USB thermal cameras
-- **GPS-loss position uncertainty warning** — RuleEngine rule: GPS=0 AND position_uncertainty > 4m → STATUSTEXT WARNING; >6m → STATUSTEXT CRITICAL + RTL recommendation. Uses Kalman-derived `pose_var_x_/y_` (Bug Fix #40) — physically correct, does NOT trigger during HOVER (drift minimal when stationary). Much smarter than raw time-based rule.
 
 ### P3 - Future
 - Sensor fusion (dual-camera VO simultaneously)

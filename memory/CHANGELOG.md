@@ -1,5 +1,17 @@
 # JT-Zero Changelog
 
+## 2026-04-16 — GPS-Loss Position Uncertainty Warning (Fix #50)
+
+### Fix #50 — GPS DEGRADED / GPS LOST STATUSTEXT
+- **Що:** Коли GPS fix_type < 3 і дрон armed, Kalman-derived `position_uncertainty` (Fix #40) зростає з накопиченням дрейфу VO. Ніяких попереджень не надходило.
+- **Рішення:** `gps_warn_tick()` в `native_bridge.py` — викликається 1Hz з `_vo_fallback_monitor`.
+  - `uncertainty > 4m` → `MAV_SEVERITY_WARNING` "JT0: GPS DEGRADED unc=Xm VO only"
+  - `uncertainty > 8m` → `MAV_SEVERITY_CRITICAL` "JT0: GPS LOST unc=Xm RTL ADVISED"
+  - Debounce: 30с між повторними повідомленнями. Escalation без debounce.
+  - Hover-aware: uncertainty зростає тільки з реальним дрейфом, не в зависанні.
+  - GPS recovery: логує `[GPS Warn] GPS recovered` при поверненні фіксу.
+- **Файли:** `backend/native_bridge.py` (gps_warn_tick + state init), `backend/server.py` (виклик 1Hz), `backend/simulator.py` (no-op stub)
+
 ## 2026-04-15 — Thread Safety, Git Hygiene, LK IMU Hints Hardware Fix
 
 ### Phase 01 — SystemState Thread Safety (Fix #43)
