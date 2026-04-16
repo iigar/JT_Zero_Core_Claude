@@ -460,8 +460,8 @@ bool MAVLinkInterface::send_odometry(const MAVOdometry& msg) {
         if (msg.quality < 80) {
             pos_var = 0.1f + (80.0f - msg.quality) * 0.05f; // up to 4.1m uncertainty
         }
-        if (msg.quality < 20) {
-            pos_var = 10.0f; // very low confidence → 10m uncertainty (EKF will mostly ignore)
+        if (msg.quality < 40) {
+            pos_var = 10.0f; // low confidence → 10m uncertainty (EKF ignores, prevents cycling)
         }
         float rot_var = 0.01f; // rotation variance (fixed, yaw from gyro)
         // Diagonal elements: xx, yy, zz, roll, pitch, yaw
