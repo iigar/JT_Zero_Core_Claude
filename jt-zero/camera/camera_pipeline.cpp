@@ -759,6 +759,10 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     float feature_quality = std::min(1.0f, static_cast<float>(inlier_count) / 30.0f);
     
     float raw_confidence = track_quality * inlier_ratio * imu_consistency * feature_quality;
+    if (frame_count_ % 150 == 0) {  // log every ~10s
+        fprintf(stderr, "[VO DBG] tq=%.3f ir=%.3f ic=%.3f fq=%.3f raw=%.3f run=%.3f act=%zu\n",
+            track_quality, inlier_ratio, imu_consistency, feature_quality, raw_confidence, running_confidence_, active_count_);
+    }
     
     constexpr float alpha = 0.3f;
     running_confidence_ = alpha * raw_confidence + (1.0f - alpha) * running_confidence_;
