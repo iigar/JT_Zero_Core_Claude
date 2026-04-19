@@ -1,5 +1,36 @@
 # JT-Zero Changelog
 
+## 2026-04-19 — Fix #51-53: GPS warn opt-in, confidence стабілізація, Kalman hover decay
+
+### Fix #51 — GPS warn opt-in (JTZERO_GPS_WARN=1)
+- При GPS_TYPE=0 gps_warn_tick() спамила STATUSTEXT. Тепер вимкнено за замовч.
+- `backend/native_bridge.py`
+
+### Fix #52 — VO confidence стабілізація
+- EMA alpha: 0.3 → 0.1 (часова константа 200мс → 670мс, менше осциляцій)
+- imu_consistency penalty: 5.0 → 2.0 (м'якший штраф за IMU/VO розбіжність)
+- `jt-zero/camera/camera_pipeline.cpp`
+
+### Fix #53 — Kalman hover velocity decay
+- kf_vx_/vy_ *= 0.85 кожен кадр при hover_.detected && hover_.duration>1s
+- Запобігає накопиченню IMU bias у Kalman за тривалої нерухомості (conf падав до 0.09)
+- `jt-zero/camera/camera_pipeline.cpp`
+
+### Debug cleanup
+- Видалено [VO DBG] fprintf з camera_pipeline.cpp
+- `jt-zero/camera/camera_pipeline.cpp`
+
+## 2026-04-19 — Fix #50 opt-in + debug cleanup (замінено вище)
+
+### Fix #50b — GPS warn opt-in via JTZERO_GPS_WARN=1
+- **Проблема:** GPS_TYPE=0 setups (VO-only) отримували спам STATUSTEXT без GPS — `fix_type` завжди 0, uncertainty зростає → постійні WARNING/CRITICAL без сенсу
+- **Рішення:** `gps_warn_tick()` читає `os.environ.get('JTZERO_GPS_WARN', '0')` при ініціалізації → `_GPS_WARN_ENABLED` flag. За замовчуванням вимкнено. Щоб увімкнути: `JTZERO_GPS_WARN=1` у `/etc/jtzero.env` або `systemd` service file.
+- **Файли:** `backend/native_bridge.py` (init + gps_warn_tick early return)
+
+### Debug cleanup — видалено fprintf з camera_pipeline.cpp
+- Видалено `[VO DBG]` fprintf (кожні 10с) доданий для діагностики fix #52. Діагностика завершена: поріг знижено до 0.32, conf=0.33 проходить.
+- **Файл:** `jt-zero/camera/camera_pipeline.cpp`
+
 ## 2026-04-16 — GPS-Loss Position Uncertainty Warning (Fix #50)
 
 ### Fix #50 — GPS DEGRADED / GPS LOST STATUSTEXT

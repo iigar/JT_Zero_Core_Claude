@@ -707,6 +707,19 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         kf_vx_ += imu_ax_ * dt;
         kf_vy_ += imu_ay_ * dt;
     }
+
+    // Fix 53a: Kalman velocity decay in confirmed hover.
+    // Problem: with low Kalman gain (K≈0.06), a small IMU bias (e.g. acc_x=-0.069 m/s²)
+    // causes kf_vx_ to drift to ~-0.07 m/s after minutes of stationary idle.
+    // Phase 3 then sees actual_dvx=0.07 vs expected_dvx=0 → imu_consistency hits floor.
+    // Fix: when hover is confirmed for > 1s, decay kf_vx_/vy_ toward zero at 0.85/frame.
+    // At 15fps: after 1s kf_vx_ → initial × 0.85^15 ≈ 0.087 × initial ≈ ~0.
+    // During flight hover_.detected may be true during slow hover — decay is safe because
+    // it only corrects the bias offset, not a real velocity signal (VO update still applies).
+    if (hover_.detected && hover_.duration > 1.0f) {
+        kf_vx_ *= 0.85f;
+        kf_vy_ *= 0.85f;
+    }
     // Process noise grows variance each frame regardless of IMU availability
     kf_vx_var_ += Q;
     kf_vy_var_ += Q;
@@ -744,8 +757,11 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         float discrepancy = std::sqrt(
             (actual_dvx - expected_dvx) * (actual_dvx - expected_dvx) +
             (actual_dvy - expected_dvy) * (actual_dvy - expected_dvy));
-        // Scale: 1 m/s² discrepancy over 1 frame (66ms) ≈ 0.066 m/s delta → ~0.33 penalty
-        imu_consistency = std::max(0.1f, 1.0f - discrepancy * 5.0f);
+        // Scale: multiplier 2.0 (was 5.0) — softer penalty so small IMU/VO noise
+        // doesn't instantly floor confidence. At 5.0 any 0.18 m/s gap → floor (0.1).
+        // At 2.0 the same gap → 0.64, which still penalises real disagreement without
+        // causing rapid oscillation on noisy hand-held or low-vibration hover data.
+        imu_consistency = std::max(0.1f, 1.0f - discrepancy * 2.0f);
         imu_hint_valid_ = false;
     }
     
@@ -759,12 +775,10 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     float feature_quality = std::min(1.0f, static_cast<float>(inlier_count) / 30.0f);
     
     float raw_confidence = track_quality * inlier_ratio * imu_consistency * feature_quality;
-    if (frame_count_ % 150 == 0) {  // log every ~10s
-        fprintf(stderr, "[VO DBG] tq=%.3f ir=%.3f ic=%.3f fq=%.3f raw=%.3f run=%.3f act=%zu\n",
-            track_quality, inlier_ratio, imu_consistency, feature_quality, raw_confidence, running_confidence_, active_count_);
-    }
-    
-    constexpr float alpha = 0.3f;
+
+    // alpha 0.1 (was 0.3): slower EMA → confidence changes over ~0.67s instead of ~0.2s.
+    // Prevents rapid per-frame oscillation caused by noisy imu_consistency values.
+    constexpr float alpha = 0.1f;
     running_confidence_ = alpha * raw_confidence + (1.0f - alpha) * running_confidence_;
     
     bool position_update = running_confidence_ > 0.32f && inlier_count >= adaptive_.min_inliers;

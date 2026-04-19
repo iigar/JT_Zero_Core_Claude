@@ -129,6 +129,9 @@ class NativeRuntime:
         # Fires when GPS is degraded and Kalman-derived uncertainty exceeds thresholds.
         # Uses pose_var_x_/y_ (Fix #40) — physically correct, not ad-hoc time-based.
         # Does not spam: minimum _GPS_WARN_DEBOUNCE_S between messages.
+        # Opt-in: set env var JTZERO_GPS_WARN=1 to enable (off by default — GPS_TYPE=0 setups get no spam).
+        import os as _os
+        self._GPS_WARN_ENABLED      = _os.environ.get('JTZERO_GPS_WARN', '0') == '1'
         self._GPS_WARN_THRESHOLD_M  = 4.0   # WARNING level (m)
         self._GPS_WARN_CRITICAL_M   = 8.0   # CRITICAL level (m)
         self._GPS_WARN_DEBOUNCE_S   = 30.0  # min seconds between STATUSTEXT messages
@@ -526,7 +529,7 @@ class NativeRuntime:
         meaningful, grows with real drift, stays low in hover.
         Debounced: at most one message per _GPS_WARN_DEBOUNCE_S seconds.
         """
-        if not self.running:
+        if not self.running or not self._GPS_WARN_ENABLED:
             return
 
         try:
