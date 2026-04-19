@@ -714,9 +714,9 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // Phase 3 then sees actual_dvx=0.07 vs expected_dvx=0 → imu_consistency hits floor.
     // Fix: when hover is confirmed for > 1s, decay kf_vx_/vy_ toward zero at 0.85/frame.
     // At 15fps: after 1s kf_vx_ → initial × 0.85^15 ≈ 0.087 × initial ≈ ~0.
-    // During flight hover_.detected may be true during slow hover — decay is safe because
+    // During flight hover_.is_hovering may be true during slow hover — decay is safe because
     // it only corrects the bias offset, not a real velocity signal (VO update still applies).
-    if (hover_.detected && hover_.duration > 1.0f) {
+    if (hover_.is_hovering && hover_.hover_duration_sec > 1.0f) {
         kf_vx_ *= 0.85f;
         kf_vy_ *= 0.85f;
     }
