@@ -927,7 +927,6 @@ void Runtime::camera_loop() {
         
         // Zone A: read range from atomic snapshot (no mutex needed)
         SafetySnapshot snap_a = ss_decode(safety_snapshot_.load(std::memory_order_acquire));
-        float ground_dist = snap_a.range_valid ? snap_a.range_distance : 1.0f;
 
         if (camera_.is_running()) {
             // Zone B: read IMU/attitude/altitude under sensor_mutex_
@@ -940,6 +939,21 @@ void Runtime::camera_loop() {
                 cam_acc_y    = state_.imu.acc_y;
                 cam_gyro_z   = state_.imu.gyro_z;
             }
+
+            // Fix 54: ground_dist for pixel→meter scale.
+            // Priority: rangefinder (most accurate) → baro altitude (when > 2m, good at
+            // cruise altitude 200-500m) → 1.0m default (ground / low hover without sensor).
+            // Without this fix, VO scale at 500m was 500× wrong (1.0m assumed instead of 500m),
+            // making raw_vx 500× too small and position estimates meaningless at altitude.
+            float ground_dist;
+            if (snap_a.range_valid) {
+                ground_dist = snap_a.range_distance;
+            } else if (cam_altitude > 2.0f) {
+                ground_dist = cam_altitude;
+            } else {
+                ground_dist = 1.0f;
+            }
+
             // Feed altitude and yaw to camera VO for adaptive params + hover correction
             camera_.set_altitude(cam_altitude);
             camera_.set_yaw_hint(cam_yaw * 0.0174533f); // deg to rad
