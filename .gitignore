@@ -12,7 +12,6 @@ venv/
 # Node
 frontend/node_modules/
 frontend/build/
-frontend/package-lock.json
 
 # C++ build artifacts
 jt-zero/build/
