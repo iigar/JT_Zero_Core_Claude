@@ -54,15 +54,15 @@ export default function Header({ state, connected, runtimeMode }) {
           </div>
         </div>
 
-        {/* Native badge */}
+        {/* Native badge — hidden on mobile */}
         {runtimeMode === 'native' && (
-          <div className="text-[9px] font-bold px-2 py-0.5 border border-emerald-500/30 text-emerald-300 uppercase tracking-wider"
+          <div className="hidden sm:block text-[9px] font-bold px-2 py-0.5 border border-emerald-500/30 text-emerald-300 uppercase tracking-wider"
                style={{ background: 'rgba(52,211,153,0.07)', borderRadius: '3px' }}>
             C++ NATIVE
           </div>
         )}
 
-        <div className="w-px h-4 bg-[#1E293B]" />
+        <div className="hidden sm:block w-px h-4 bg-[#1E293B]" />
 
         {/* Flight mode */}
         <div className="flex items-center gap-2" data-testid="flight-mode-badge">
@@ -81,6 +81,8 @@ export default function Header({ state, connected, runtimeMode }) {
         </div>
 
         <div className="w-px h-4 bg-[#1E293B]" />
+
+        <div className="hidden sm:block w-px h-4 bg-[#1E293B]" />
 
         {/* Connection */}
         <div className="flex items-center gap-1.5">
@@ -101,8 +103,8 @@ export default function Header({ state, connected, runtimeMode }) {
       {/* RIGHT: Telemetry strip */}
       <div className="flex items-center gap-5 h-full">
 
-        {/* Heartbeat */}
-        <div className="flex items-center gap-1.5" data-testid="heartbeat-indicator">
+        {/* Heartbeat — hidden on mobile */}
+        <div className="hidden sm:flex items-center gap-1.5" data-testid="heartbeat-indicator">
           <Activity
             className={`w-3 h-3 ${connected ? 'text-emerald-400' : 'text-slate-700'}`}
             style={connected ? { filter: 'drop-shadow(0 0 3px rgba(52,211,153,0.7))' } : {}}
@@ -110,8 +112,8 @@ export default function Header({ state, connected, runtimeMode }) {
           <span className="text-[9px] uppercase tracking-wider text-slate-500">HB</span>
         </div>
 
-        {/* CPU temp */}
-        <div className="flex items-center gap-1.5">
+        {/* CPU temp — hidden on mobile */}
+        <div className="hidden sm:flex items-center gap-1.5">
           <Cpu className="w-3 h-3 text-slate-500" />
           <span className="readout text-[11px] text-slate-300 tabular-nums">
             {state?.cpu_temp?.toFixed(1) ?? '—'}
@@ -119,8 +121,8 @@ export default function Header({ state, connected, runtimeMode }) {
           </span>
         </div>
 
-        {/* Uptime */}
-        <div className="flex items-center gap-1.5">
+        {/* Uptime — hidden on mobile */}
+        <div className="hidden sm:flex items-center gap-1.5">
           <Clock className="w-3 h-3 text-slate-500" />
           <span className="readout text-[11px] text-slate-300 tabular-nums">
             T+{state?.uptime_sec ?? 0}

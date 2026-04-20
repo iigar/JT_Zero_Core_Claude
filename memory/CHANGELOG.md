@@ -1,5 +1,18 @@
 # JT-Zero Changelog
 
+## 2026-04-20 — Mobile UI responsive layout
+
+### Зміни
+- **`frontend/src/index.css`**: мобільний `@media (max-width: 639px)` — `body { overflow: auto }`, відключено sweep-анімацію та hud-lines для продуктивності, `min-height: 36px` на кнопки для touch targets
+- **`frontend/src/App.js`**: tab nav — іконки+текст на десктопі, лише іконки на мобілці (`hidden sm:inline`); status pills сховані на мобілці; `main` → `overflow-y-auto sm:overflow-hidden`; `DashboardTab` sidebar прихований на мобілці (`hidden sm:flex`), всі `grid-cols-12` з фіксованими висотами → `grid-cols-1 sm:grid-cols-12` + `h-48 sm:h-auto`; те саме для TelemetryTab і MavlinkTab; CameraTab split `grid-cols-2` → `grid-cols-1 sm:grid-cols-2`
+- **`frontend/src/components/Header.js`**: C++ NATIVE badge, dividers, Heartbeat, CPU temp, Uptime — сховані на мобілці (`hidden sm:flex/block`); лишились лого + режим + wifi + батарея
+
+### Що тепер працює на мобілці
+- 7 табів = 7 іконок, поміщаються в один рядок на 375px
+- Dashboard прокручується вертикально, кожен блок 192px висотою
+- Header компактний — лише критична інформація
+- Touch targets >= 36px
+
 ## 2026-04-19 — Fix #51-53: GPS warn opt-in, confidence стабілізація, Kalman hover decay
 
 ### Fix #51 — GPS warn opt-in (JTZERO_GPS_WARN=1)

@@ -341,3 +341,28 @@ body::after {
   pointer-events: none;
   z-index: 9997;
 }
+
+/* ═══════════════════════════════════════════════════════════ */
+/* Mobile responsive overrides (< 640px)                     */
+/* ═══════════════════════════════════════════════════════════ */
+@media (max-width: 639px) {
+  /* Allow scrolling on mobile — desktop uses overflow:hidden layout */
+  body {
+    overflow: auto;
+  }
+
+  /* Disable sweep animation on mobile for performance */
+  .sweep-overlay::after {
+    display: none;
+  }
+
+  /* Disable dot-grid on mobile for performance */
+  .hud-lines {
+    background-image: none;
+  }
+
+  /* Touch-friendly tap targets */
+  button {
+    min-height: 36px;
+  }
+}
