@@ -6,8 +6,10 @@ on:
       - 'frontend/src/**'
       - 'frontend/public/**'
       - 'frontend/package.json'
+      - 'frontend/package-lock.json'
       - 'frontend/tailwind.config.js'
       - 'frontend/postcss.config.js'
+      - '.github/workflows/build-frontend.yml'
     branches: ['*']
 
 permissions:
