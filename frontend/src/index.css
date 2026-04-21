@@ -343,9 +343,9 @@ body::after {
 }
 
 /* ═══════════════════════════════════════════════════════════ */
-/* Mobile responsive overrides (< 640px)                     */
+/* Mobile responsive overrides (< 1024px)                    */
 /* ═══════════════════════════════════════════════════════════ */
-@media (max-width: 639px) {
+@media (max-width: 1023px) {
   /* Allow scrolling on mobile — desktop uses overflow:hidden layout */
   body {
     overflow: auto;

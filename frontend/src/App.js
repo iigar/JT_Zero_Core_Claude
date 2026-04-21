@@ -146,26 +146,26 @@ function App() {
       <Header state={state} connected={connected} runtimeMode={runtimeMode} />
 
       {/* Tab Navigation */}
-      <nav className="flex items-center gap-0 bg-[#0A0C10] border-b border-[#1E293B] px-1 sm:px-2 shrink-0 overflow-x-auto" data-testid="tab-nav">
+      <nav className="flex items-center gap-0 bg-[#0A0C10] border-b border-[#1E293B] px-1 lg:px-2 shrink-0 overflow-x-auto" data-testid="tab-nav">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             data-testid={`tab-${id}`}
             onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-2.5 sm:py-2 text-[10px] font-semibold uppercase tracking-wider transition-all border-b-2 shrink-0 ${
+            className={`flex items-center gap-1 lg:gap-1.5 px-2.5 lg:px-3 py-2.5 lg:py-2 text-[10px] font-semibold uppercase tracking-wider transition-all border-b-2 shrink-0 ${
               activeTab === id
                 ? 'text-[#00F0FF] border-[#00F0FF] bg-[#00F0FF]/5 tab-active'
                 : 'text-slate-500 border-transparent hover:text-slate-300 hover:border-slate-600'
             }`}
             style={activeTab === id ? { textShadow: '0 0 8px rgba(0,240,255,0.5)', boxShadow: '0 2px 0 -1px rgba(0,240,255,0.25)' } : {}}
           >
-            <Icon className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-            <span className="hidden sm:inline">{label}</span>
+            <Icon className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
+            <span className="hidden lg:inline">{label}</span>
           </button>
         ))}
 
         {/* Status pills right-aligned — hidden on mobile */}
-        <div className="ml-auto hidden sm:flex items-center gap-2 pr-2">
+        <div className="ml-auto hidden lg:flex items-center gap-2 pr-2">
           <StatusPill label="THREADS" value={`${threads?.filter(t => t.running).length || 0}/8`} ok={threads?.filter(t => t.running).length >= 7} />
           <StatusPill label="MODE" value={runtimeMode === 'native' ? 'C++' : 'PY'} ok={runtimeMode === 'native'} />
           <StatusPill label="EVT" value={events.length} ok />
@@ -173,7 +173,7 @@ function App() {
       </nav>
 
       {/* Tab Content */}
-      <main className="flex-1 min-h-0 overflow-y-auto sm:overflow-hidden">
+      <main className="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden">
         {activeTab === 'dashboard' && (
           <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} events={events} features={features} sensorModes={sensorModes} cameras={cameras} voTrail={voTrail} />
         )}
@@ -214,9 +214,9 @@ function App() {
 function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, systemMetrics, runtimeMode, events, features, sensorModes, cameras, voTrail }) {
   const secondaryCam = cameras?.find(c => c.slot === 'SECONDARY');
   return (
-    <div className="sm:h-full flex flex-col sm:flex-row sm:overflow-hidden">
+    <div className="lg:h-full flex flex-col lg:flex-row lg:overflow-hidden">
       {/* Compact sidebar — hidden on mobile */}
-      <aside className="hidden sm:flex flex-col w-36 shrink-0 bg-[#0A0C10] border-r border-[#1E293B] p-2 overflow-y-auto">
+      <aside className="hidden lg:flex flex-col w-36 shrink-0 bg-[#0A0C10] border-r border-[#1E293B] p-2 overflow-y-auto">
         <Section title="System">
           <DataRow label="CPU" value={`${systemMetrics?.cpu?.total_percent ?? state?.cpu_usage?.toFixed(1) ?? 0}%`} />
           <DataRow label="RAM" value={`${systemMetrics?.memory?.used_mb ?? state?.ram_usage_mb?.toFixed(0) ?? 0}MB`} />
@@ -278,16 +278,16 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
       {/* Main grid */}
       <div className="flex-1 flex flex-col gap-2 p-2 overflow-y-auto">
         {/* Row 1: 3D + Telemetry + Sensors */}
-        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 shrink-0 sm:h-[240px]">
-          <div className="sm:col-span-3 h-48 sm:h-auto overflow-hidden"><Drone3DPanel state={state} voTrail={voTrail} /></div>
-          <div className="sm:col-span-3 h-48 sm:h-auto overflow-hidden"><DronePanel state={state} history={history} /></div>
-          <div className="sm:col-span-6 h-48 sm:h-auto overflow-hidden"><SensorPanels state={state} history={history} sensorModes={sensorModes} /></div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 shrink-0 lg:h-[240px]">
+          <div className="lg:col-span-3 h-48 lg:h-auto overflow-hidden"><Drone3DPanel state={state} voTrail={voTrail} /></div>
+          <div className="lg:col-span-3 h-48 lg:h-auto overflow-hidden"><DronePanel state={state} history={history} /></div>
+          <div className="lg:col-span-6 h-48 lg:h-auto overflow-hidden"><SensorPanels state={state} history={history} sensorModes={sensorModes} /></div>
         </div>
         {/* Row 2: Camera + MAVLink + Performance */}
-        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 shrink-0 sm:h-[220px]">
-          <div className="sm:col-span-4 h-48 sm:h-auto overflow-hidden"><CameraPanel camera={camera} features={features} /></div>
-          <div className="sm:col-span-4 h-48 sm:h-auto overflow-hidden"><MAVLinkPanel mavlink={mavlink} /></div>
-          <div className="sm:col-span-4 h-48 sm:h-auto overflow-hidden"><PerformancePanel performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} /></div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 shrink-0 lg:h-[220px]">
+          <div className="lg:col-span-4 h-48 lg:h-auto overflow-hidden"><CameraPanel camera={camera} features={features} /></div>
+          <div className="lg:col-span-4 h-48 lg:h-auto overflow-hidden"><MAVLinkPanel mavlink={mavlink} /></div>
+          <div className="lg:col-span-4 h-48 lg:h-auto overflow-hidden"><PerformancePanel performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} /></div>
         </div>
         {/* Row 3: Mini event log */}
         <div className="shrink-0 overflow-hidden h-[150px]">
@@ -380,7 +380,7 @@ function CameraTab({ camera, features, cameras }) {
       {/* Camera views */}
       <div className="flex-1 min-h-0">
         {activeView === 'split' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 h-full">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 h-full">
             <CameraPanel camera={camera} features={isVOFallback ? [] : features} />
             {hasThermal ? (
               <ThermalPanel secondary={secondaryCam} features={isVOFallback ? features : []} camera={isVOFallback ? camera : null} isVOActive={isVOFallback} />
@@ -416,17 +416,17 @@ function CameraTab({ camera, features, cameras }) {
 function TelemetryTab({ state, history, performance, systemMetrics, runtimeMode, threads, sensorModes }) {
   return (
     <div className="flex flex-col gap-2 p-3 overflow-y-auto">
-      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 shrink-0 sm:h-[300px]">
-        <div className="sm:col-span-8 h-64 sm:h-auto overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 shrink-0 lg:h-[300px]">
+        <div className="lg:col-span-8 h-64 lg:h-auto overflow-hidden">
           <TelemetryCharts history={history} />
         </div>
-        <div className="sm:col-span-4 h-48 sm:h-auto overflow-hidden">
+        <div className="lg:col-span-4 h-48 lg:h-auto overflow-hidden">
           <PerformancePanel performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} />
         </div>
       </div>
       {/* Sensor detail grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 shrink-0 sm:h-[220px]">
-        <div className="sm:col-span-12 h-48 sm:h-auto overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 shrink-0 lg:h-[220px]">
+        <div className="lg:col-span-12 h-48 lg:h-auto overflow-hidden">
           <SensorPanels state={state} history={history} sensorModes={sensorModes} />
         </div>
       </div>
@@ -441,10 +441,10 @@ function TelemetryTab({ state, history, performance, systemMetrics, runtimeMode,
 function MavlinkTab({ mavlink }) {
   return (
     <div className="flex flex-col gap-2 p-3 overflow-y-auto">
-      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2" style={{ minHeight: '280px' }}>
-        <div className="sm:col-span-5"><MAVLinkDiagPanel mavlink={mavlink} /></div>
-        <div className="sm:col-span-4"><CommandPanel /></div>
-        <div className="sm:col-span-3"><FlightLogPanel /></div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2" style={{ minHeight: '280px' }}>
+        <div className="lg:col-span-5"><MAVLinkDiagPanel mavlink={mavlink} /></div>
+        <div className="lg:col-span-4"><CommandPanel /></div>
+        <div className="lg:col-span-3"><FlightLogPanel /></div>
       </div>
     </div>
   );
