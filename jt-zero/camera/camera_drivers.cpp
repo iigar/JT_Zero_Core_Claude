@@ -122,9 +122,13 @@ bool PiCSICamera::open() {
     }
     
     // Use rpicam-vid to output raw YUV420 frames to stdout
-    // 640x480 at 15fps, no preview window, indefinite duration
+    // 640x480 at 15fps, fixed shutter 8ms + gain 4.0 for stable VO brightness.
+    // Auto-exposure causes frame-to-frame brightness variation that confuses LK tracker
+    // (overexposure at bright=181 → conf=0.00). Fixed shutter gives predictable frames.
+    // 8ms (1/125s): no overexposure in direct sunlight, sufficient sensitivity indoors.
     const char* cmd = "rpicam-vid --width 640 --height 480 "
                       "--codec yuv420 --framerate 15 "
+                      "--shutter 8000 --gain 4.0 "
                       "-t 0 --nopreview -o - 2>/dev/null";
     
     pipe_ = popen(cmd, "r");
