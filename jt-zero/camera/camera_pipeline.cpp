@@ -781,7 +781,12 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     constexpr float alpha = 0.1f;
     running_confidence_ = alpha * raw_confidence + (1.0f - alpha) * running_confidence_;
     
-    bool position_update = running_confidence_ > 0.32f && inlier_count >= adaptive_.min_inliers;
+    // Threshold 0.15 (was 0.32): during active flight conf drops to 0.15-0.35 due to
+    // imu_consistency variation — geometrically the estimate is still valid (30+ inliers).
+    // EKF3 handles noise via covariance weighting, NOT by toggling the source on/off.
+    // Cutting off VISION_POSITION_ESTIMATE (by setting valid=false) causes EKF3 timeout
+    // → position drift. Better to send with higher covariance than to stop sending.
+    bool position_update = running_confidence_ > 0.15f && inlier_count >= adaptive_.min_inliers;
     
     if (position_update) {
         pose_x_ += result.dx;
