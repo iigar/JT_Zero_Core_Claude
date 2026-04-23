@@ -169,12 +169,51 @@ Decay ×0.995/кадр при confidence > 0.7; growth ×4 при dead-reckoning
 
 ---
 
+---
+
+## Сесія 2026-04-22/23 — Mobile UI breakpoint + Fix #54 camera exposure
+
+### 1. Mobile UI — Variant A завершено
+
+Замінено `sm:` → `lg:` у 3 файлах (breakpoint 640px → 1024px).
+Тепер будь-який екран < 1024px отримує mobile layout (icons only, stack, без sidebar).
+Landscape телефон більше не показує desktop UI.
+
+- `frontend/src/App.js` — всі sm: → lg:
+- `frontend/src/components/Header.js` — всі sm: → lg:
+- `frontend/src/index.css` — @media max-width 639px → 1023px
+- Commit: `cd0ed47`, CI збілдив автоматично
+
+### 2. Fix #54 — rpicam-vid фіксована витримка (Bug Fix #54 в CLAUDE.md)
+
+**Проблема:** auto-exposure → bright=181 при яскравому освітленні → conf=0.00.
+Також: AEC змінює яскравість між кадрами → LK tracker нестабільний.
+
+**Рішення:** `--shutter 8000` (8ms фіксована) + auto gain (без `--gain`).
+- Фіксована витримка = однакові кадри → LK стабільний
+- Auto gain адаптується до освітлення (темно → gain вгору, сонце → gain вниз)
+- AEC більше не може дати bright=181 (обмежений 8ms)
+- TRK покращився: 23 → 71 у тестах
+
+**Файл:** `jt-zero/camera/camera_drivers.cpp:126`
+**Commits:** `4c369cb` (fix), `0959f58` (auto gain)
+
+### 3. Діагностика conf=0.03-0.04
+
+- conf на землі низький НЕ через баг, а через фізику: темрява → high gain → шум → уявний рух → imu_consistency = floor
+- Дрон стоїть під 90° → камера дивиться в стіну (не в підлогу)
+- В польоті надворі вдень: bright буде 60-150+, imu_consistency нормалізується, conf > 0.32
+- Контекст-файли Obsidian оновлено (projects.md, insights.md)
+
+---
+
 ## Відкриті задачі
 
 | Пріоритет | Задача |
 |-----------|--------|
-| HIGH | C++ thread safety: data race на SystemState (8 потоків без mutex) |
-| HIGH | C++ MemoryPool::allocate() race condition |
-| MED | Repo hygiene: прибрати `.gitconfig`, `*.so`, `jt-zero/build/` з git tracking |
+| **NEXT** | Тест надворі вдень — перший реальний польот з поточним VO pipeline |
+| ~~HIGH~~ | ~~C++ thread safety: data race на SystemState~~ — ЗАКРИТО Bug Fix #43,#47,#48,#49 |
+| ~~HIGH~~ | ~~C++ MemoryPool::allocate() race condition~~ — ЗАКРИТО tagged pointer |
+| HIGH | IMU preint std::mutex в T1 @ 200Hz (hot path) |
+| MED | Repo hygiene: прибрати `*.so`, `jt-zero/build/` з git tracking |
 | LOW | Pi deploy: після нового salt скинути пароль через `/api/logs/password` |
-| LOW | Тест Fix 6 на Pi: виміряти tracked features при швидкому yaw |

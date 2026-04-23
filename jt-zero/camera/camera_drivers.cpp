@@ -122,14 +122,16 @@ bool PiCSICamera::open() {
     }
     
     // Use rpicam-vid to output raw YUV420 frames to stdout
-    // 640x480 at 15fps, fixed shutter 8ms + auto gain for stable VO brightness.
-    // Fixed shutter prevents overexposure peaks (bright=181→conf=0.00) and motion blur.
-    // Auto gain (no --gain arg) adapts to ambient light: dark room→gain auto-high,
-    // bright sun→gain auto-low. AEC cannot overexpose beyond shutter×max_gain cap.
+    // 640x480 at 15fps, fixed shutter 8ms + fixed gain 1.0 for stable VO.
+    // Fixed shutter prevents motion blur and overexposure (bright=181→conf=0.00).
+    // Fixed gain (--gain 1.0 = unity, native sensor sensitivity) eliminates AGC
+    // frame-to-frame transitions: auto gain changes pixel intensities between frames,
+    // breaking LK gradient consistency → conf drops during any light change.
+    // gain=1.0: works for outdoor daytime. Night: VO fallback to thermal camera.
     // 8ms (1/125s): fast enough for drone motion at typical VO altitudes.
     const char* cmd = "rpicam-vid --width 640 --height 480 "
                       "--codec yuv420 --framerate 15 "
-                      "--shutter 8000 "
+                      "--shutter 8000 --gain 1.0 "
                       "-t 0 --nopreview -o - 2>/dev/null";
     
     pipe_ = popen(cmd, "r");
