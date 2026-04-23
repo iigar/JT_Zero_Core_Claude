@@ -210,14 +210,58 @@ Landscape телефон більше не показує desktop UI.
 
 ---
 
+## Сесія 2026-04-24 (ніч) — LOITER indoor тести + серія фіксів
+
+### Виконані фікси (всі задеплоєні)
+
+| Fix | Проблема | Рішення | Commit |
+|-----|----------|---------|--------|
+| #54 final | Auto gain (AGC) транзієнти між кадрами → conf 0.17→0.13 при фонарику | `--gain 1.0` (unity, fixed) | b2733fc |
+| #55a | vo_valid per-frame flip → EKF3 дрейф при короткочасних conf дипах | Debounce: false після 5 кадрів (333ms), true після 2 | dada015 |
+| #55b | Поріг 0.32 вимикав VO весь час польоту | 0.32 → 0.15 | 15f32ff |
+| #55c | imu_consistency флорував на 0.1 під час руху → conf=0.11 | Прибрати з raw_confidence формули | 91260ad |
+| #56 | ground_dist=1.0м при 500мм польоті → scale 2× → осциляція | Поріг 2.0→0.1м (baro при 500мм = 0.5м, точніше) | 6c5563a |
+
+### Результати conf після фіксів
+
+| Стан | До | Після |
+|------|-----|-------|
+| Нерухомість | 0.27→0.17 (дрейф) | 0.51-0.64 (стабільно) |
+| Активний польот | 0.11-0.13 (нижче порогу) | 0.20-0.54 (vo_valid=true) |
+
+### Залишилась проблема: LOITER осциляція
+
+**Симптом:** "сильно несе то в один бік, то геть в інший" + висота нестабільна.
+
+**Діагноз:**
+1. **VISO_DELAY_MS не встановлено** (найймовірніша причина) — EKF3 думає VO дані поточні, але вони на ~100мс старі (Pi Zero обробка). Це викликає систематичне неузгодження швидкостей IMU↔VO → EKF3 рахує позицію неправильно → LOITER коригує у неправильний бік → осциляція.
+2. **Накопичена позиція під час Stabilize** — при переключенні у LOITER pose_x_, pose_y_ вже мають похибку від фази підйому. Workaround: SET HOMEPOINT перед LOITER.
+3. **Висота** — EK3_SRC1_POSZ=1 (баро). Indoor баро шумний від prop wash. Без rangefinder нормально.
+
+**ArduPilot параметри для налаштування:**
+```
+VISO_DELAY_MS = 100   ← КРИТИЧНО, зараз напевно 0 (default)
+PSC_POSXY_P   = 0.5   ← зменшити з дефолтного для плавнішої корекції
+LOIT_SPEED    = 500   ← зменшити (5 м/с)
+```
+
+**Workaround до параметрів:** SET HOMEPOINT одразу перед переключенням у LOITER.
+
+**Наступна діагностична правка (не зроблено):** додати pose_x_, pose_y_ у VO Monitor рядок — щоб бачити чи позиція дрейфує під час польоту.
+
+---
+
 ## Відкриті задачі
 
 | Пріоритет | Задача |
 |-----------|--------|
-| **NEXT** | Тест надворі — перший реальний польот (pipeline підтверджено indoor, conf=61%) |
-| ~~HIGH~~ | ~~C++ thread safety: data race на SystemState~~ — ЗАКРИТО Bug Fix #43,#47,#48,#49 |
-| ~~HIGH~~ | ~~C++ MemoryPool::allocate() race condition~~ — ЗАКРИТО tagged pointer |
-| ~~HIGH~~ | ~~AGC frame-to-frame instability~~ — ЗАКРИТО Bug Fix #54 (gain=1.0) |
+| **NEXT** | Встановити `VISO_DELAY_MS=100` в ArduPilot → тест LOITER |
+| **NEXT** | Додати pose_x_, pose_y_ у VO Monitor для діагностики |
+| ~~HIGH~~ | ~~C++ thread safety~~ — ЗАКРИТО |
+| ~~HIGH~~ | ~~AGC instability~~ — ЗАКРИТО (gain=1.0) |
+| ~~HIGH~~ | ~~imu_consistency в confidence~~ — ЗАКРИТО |
+| ~~HIGH~~ | ~~ground_dist поріг~~ — ЗАКРИТО (0.1м) |
 | HIGH | IMU preint std::mutex в T1 @ 200Hz (hot path) |
 | MED | Repo hygiene: прибрати `*.so`, `jt-zero/build/` з git tracking |
+| LOW | Pi deploy: скинути пароль після нового salt |
 | LOW | Pi deploy: після нового salt скинути пароль через `/api/logs/password` |
