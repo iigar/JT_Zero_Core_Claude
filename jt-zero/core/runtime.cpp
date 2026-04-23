@@ -940,15 +940,17 @@ void Runtime::camera_loop() {
                 cam_gyro_z   = state_.imu.gyro_z;
             }
 
-            // Fix 54: ground_dist for pixel→meter scale.
-            // Priority: rangefinder (most accurate) → baro altitude (when > 2m, good at
-            // cruise altitude 200-500m) → 1.0m default (ground / low hover without sensor).
-            // Without this fix, VO scale at 500m was 500× wrong (1.0m assumed instead of 500m),
-            // making raw_vx 500× too small and position estimates meaningless at altitude.
+            // ground_dist for pixel→meter VO scale.
+            // Priority: rangefinder (most accurate) → baro/EKF altitude → 1.0m default.
+            // Threshold 0.1m (was 2.0m): at low altitude (0.5-2m) baro reads correctly and
+            // is better than fixed 1.0m. Old threshold caused ground_dist=1.0m at 500mm →
+            // VO velocity 2× too large → EKF3 over-compensates → oscillation.
+            // At 100m+: no change — cam_altitude >> 0.1 in both cases, baro used correctly.
+            // Fallback 1.0m only on ground (baro ≈ 0) or when baro unavailable.
             float ground_dist;
             if (snap_a.range_valid) {
                 ground_dist = snap_a.range_distance;
-            } else if (cam_altitude > 2.0f) {
+            } else if (cam_altitude > 0.1f) {
                 ground_dist = cam_altitude;
             } else {
                 ground_dist = 1.0f;
