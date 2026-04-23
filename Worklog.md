@@ -184,26 +184,29 @@ Landscape телефон більше не показує desktop UI.
 - `frontend/src/index.css` — @media max-width 639px → 1023px
 - Commit: `cd0ed47`, CI збілдив автоматично
 
-### 2. Fix #54 — rpicam-vid фіксована витримка (Bug Fix #54 в CLAUDE.md)
+### 2. Fix #54 — rpicam-vid фіксована витримка + фіксований gain (Bug Fix #54 в CLAUDE.md)
 
-**Проблема:** auto-exposure → bright=181 при яскравому освітленні → conf=0.00.
-Також: AEC змінює яскравість між кадрами → LK tracker нестабільний.
+**Проблема 1:** auto-exposure → bright=181 при яскравому освітленні → conf=0.00.
+**Проблема 2 (нова):** auto gain → frame-to-frame pixel intensity зміни → LK gradient mismatch → conf нестабільний.
+Підтверджено на Pi: bright 17→70 (фонарик ON) → conf 0.17→0.13; bright 74→17 (OFF) → conf стрибок 0.39.
+Також: AGC викликав повільний дрейф conf 0.27→0.17 за 4хв нерухомості.
 
-**Рішення:** `--shutter 8000` (8ms фіксована) + auto gain (без `--gain`).
-- Фіксована витримка = однакові кадри → LK стабільний
-- Auto gain адаптується до освітлення (темно → gain вгору, сонце → gain вниз)
-- AEC більше не може дати bright=181 (обмежений 8ms)
-- TRK покращився: 23 → 71 у тестах
+**Рішення фінальне:** `--shutter 8000 --gain 1.0` (8ms + unity gain).
+- Фіксована витримка → нема motion blur, нема AEC
+- Фіксований gain → pixel intensities стабільні між кадрами → LK коректний
+- Тест: bright=1 над паркетом, conf=**61%**, INL=127/180 — стабільно
+- gain=1.0 (нативна чутливість) — для денного польоту достатньо; ніч = thermal fallback
 
-**Файл:** `jt-zero/camera/camera_drivers.cpp:126`
-**Commits:** `4c369cb` (fix), `0959f58` (auto gain)
+**Файл:** `jt-zero/camera/camera_drivers.cpp:130`
+**Commits:** `4c369cb`, `0959f58`, `b2733fc`
 
-### 3. Діагностика conf=0.03-0.04
+### 3. Підтверджений результат (2026-04-24)
 
-- conf на землі низький НЕ через баг, а через фізику: темрява → high gain → шум → уявний рух → imu_consistency = floor
-- Дрон стоїть під 90° → камера дивиться в стіну (не в підлогу)
-- В польоті надворі вдень: bright буде 60-150+, imu_consistency нормалізується, conf > 0.32
-- Контекст-файли Obsidian оновлено (projects.md, insights.md)
+- Дрон на підлозі над паркетом у кімнаті, нерухомо, камера вниз
+- bright=1 (gain=1.0 без підсилення, нічна кімната), але conf=**61%**, INL=127
+- Conf стабільний ±0.02 протягом 12+ хвилин (до: дрейф 0.27→0.17)
+- Зміна освітлення (фонарик): conf змінюється лише 0.30-0.35 (до: 0.13-0.39 стрибки)
+- Паркет з деревним зерном — ідеальна поверхня для VO: FAST знаходить 180 фіч
 
 ---
 
@@ -211,9 +214,10 @@ Landscape телефон більше не показує desktop UI.
 
 | Пріоритет | Задача |
 |-----------|--------|
-| **NEXT** | Тест надворі вдень — перший реальний польот з поточним VO pipeline |
+| **NEXT** | Тест надворі — перший реальний польот (pipeline підтверджено indoor, conf=61%) |
 | ~~HIGH~~ | ~~C++ thread safety: data race на SystemState~~ — ЗАКРИТО Bug Fix #43,#47,#48,#49 |
 | ~~HIGH~~ | ~~C++ MemoryPool::allocate() race condition~~ — ЗАКРИТО tagged pointer |
+| ~~HIGH~~ | ~~AGC frame-to-frame instability~~ — ЗАКРИТО Bug Fix #54 (gain=1.0) |
 | HIGH | IMU preint std::mutex в T1 @ 200Hz (hot path) |
 | MED | Repo hygiene: прибрати `*.so`, `jt-zero/build/` з git tracking |
 | LOW | Pi deploy: після нового salt скинути пароль через `/api/logs/password` |
