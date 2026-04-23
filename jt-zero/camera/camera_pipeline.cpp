@@ -839,7 +839,25 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     result.inlier_count = static_cast<uint16_t>(inlier_count);
     result.tracking_quality = track_quality;
     result.confidence = running_confidence_;
-    result.valid = position_update;
+
+    // Debounce vo_valid: prevents single-frame confidence dips from cutting off
+    // VISION_POSITION_ESTIMATE to EKF3. Without this, every brief dip below 0.32
+    // during normal flight stops VO updates → EKF3 drifts → LOITER loses position.
+    // Logic: invalid_frames_count_ must reach INVALID_FRAMES_THRESH (333ms) before
+    // vo_valid_stable_ goes false; valid_frames_count_ must reach VALID_FRAMES_THRESH
+    // (133ms) before it goes true. Asymmetric: fast recovery, slow dropout.
+    if (position_update) {
+        invalid_frames_count_ = 0;
+        if (++valid_frames_count_ >= VALID_FRAMES_THRESH) {
+            vo_valid_stable_ = true;
+        }
+    } else {
+        valid_frames_count_ = 0;
+        if (++invalid_frames_count_ >= INVALID_FRAMES_THRESH) {
+            vo_valid_stable_ = false;
+        }
+    }
+    result.valid = vo_valid_stable_;
     
     // Re-detect features using adaptive threshold if too few tracked
     size_t redetect_thresh = static_cast<size_t>(

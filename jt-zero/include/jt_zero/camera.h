@@ -530,6 +530,16 @@ private:
     
     // Running confidence metric
     float running_confidence_{0.5f};
+
+    // Debounced vo_valid state: prevents single-frame confidence dips from
+    // cutting off VISION_POSITION_ESTIMATE to EKF3 (which causes position drift).
+    // vo_valid_stable_ → false only after INVALID_FRAMES_THRESH consecutive bad frames.
+    // vo_valid_stable_ → true  after VALID_FRAMES_THRESH  consecutive good frames.
+    static constexpr int INVALID_FRAMES_THRESH = 5;  // 5×66ms = 333ms to go invalid
+    static constexpr int VALID_FRAMES_THRESH   = 2;  // 2×66ms = 133ms to restore valid
+    int   invalid_frames_count_{0};
+    int   valid_frames_count_{0};
+    bool  vo_valid_stable_{false};
     
     // ── Platform + VO Mode ──
     PlatformConfig platform_;
