@@ -774,10 +774,17 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     
     float feature_quality = std::min(1.0f, static_cast<float>(inlier_count) / 30.0f);
     
-    float raw_confidence = track_quality * inlier_ratio * imu_consistency * feature_quality;
+    // imu_consistency intentionally excluded from raw_confidence:
+    // During any real flight (acceleration, turns), imu_consistency floors at 0.1 because
+    // actual_dvx = raw_vx - kf_vx_prev_ >> expected_dvx = imu_ax * dt (tiny ~0.003 m/s).
+    // Root cause: raw_vx depends on ground_dist (often imprecise); kf_vx_ lags real velocity.
+    // Result: a single bad imu_consistency sample collapses confidence from 0.35 to 0.04,
+    // which via EMA propagates for seconds. EKF3 already handles measurement quality via its
+    // own innovation gate + covariance weighting — no need to pre-gate on imu_consistency here.
+    // imu_consistency is kept computed above for potential future use (e.g. covariance scaling).
+    float raw_confidence = track_quality * inlier_ratio * feature_quality;
 
     // alpha 0.1 (was 0.3): slower EMA → confidence changes over ~0.67s instead of ~0.2s.
-    // Prevents rapid per-frame oscillation caused by noisy imu_consistency values.
     constexpr float alpha = 0.1f;
     running_confidence_ = alpha * raw_confidence + (1.0f - alpha) * running_confidence_;
     
