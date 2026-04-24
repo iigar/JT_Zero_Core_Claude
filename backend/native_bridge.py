@@ -115,6 +115,9 @@ class NativeRuntime:
         self._rc_reset_channel = 11     # RC channel index (0-based, ch12 on transmitter)
         self._rc_reset_threshold = 1700  # PWM threshold to trigger reset
         self._rc_reset_armed = False     # edge detection: only trigger once per switch flip
+
+        # ── Auto-reset VO pose on ARM ──
+        self._prev_armed = False        # edge detection: reset pose on disarmed→armed transition
         
         # ── VO Position Trail (3D visualization) ──
         self._vo_trail = []              # list of {x, y, z, t} positions
@@ -397,7 +400,26 @@ class NativeRuntime:
         
         # ── RC-based VO Reset (always active, not just during fallback) ──
         self._check_rc_vo_reset()
-        
+
+        # ── Auto-reset VO pose on ARM (disarmed→armed edge) ──
+        # pose_x_/y_ accumulate continuously — on ground between flights they drift.
+        # Resetting at ARM ensures EKF3 always starts from (0,0,0), never from stale 582m.
+        try:
+            state = dict(self._rt.get_state())
+            armed = state.get('armed', False)
+            if armed and not self._prev_armed:
+                self._rt.send_command("vo_reset", 0, 0)
+                self._vo_trail = []
+                self._vo_pos_x = 0.0
+                self._vo_pos_y = 0.0
+                self._vo_pos_z = 0.0
+                self._send_statustext(6, "JT0: VO RESET ON ARM")
+                sys.stderr.write("[VO Auto-Reset] ARM detected → pose reset to (0,0,0)\n")
+                sys.stderr.flush()
+            self._prev_armed = armed
+        except Exception:
+            pass
+
         # ── VO Trail recording ──
         self._record_vo_trail()
         
