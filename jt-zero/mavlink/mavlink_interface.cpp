@@ -1159,13 +1159,7 @@ MAVVisionPositionEstimate MAVLinkInterface::build_vision_position(
     msg.roll  = state.roll * 0.0174533f;
     msg.pitch = state.pitch * 0.0174533f;
     msg.yaw   = state.yaw * 0.0174533f;
-    
-    // Only accumulate VO displacement when tracking is valid
-    if (vo.valid) {
-        vo_pose_x_ += vo.dx;
-        vo_pose_y_ += vo.dy;
-    }
-    
+    // Note: vo_pose_x_/y_ accumulation is done in tick() — not here.
     return msg;
 }
 
@@ -1189,17 +1183,17 @@ MAVOdometry MAVLinkInterface::build_odometry(
     msg.frame_id = 0;       // MAV_FRAME_LOCAL_NED
     msg.child_frame_id = 1; // MAV_FRAME_BODY_FRD
     
-    float cr = std::cos(state.roll * 0.0087266f);
-    float sr = std::sin(state.roll * 0.0087266f);
-    float cp = std::cos(state.pitch * 0.0087266f);
-    float sp = std::sin(state.pitch * 0.0087266f);
-    float cy = std::cos(state.yaw * 0.0087266f);
+    // Yaw-only quaternion: do NOT send roll/pitch back to FC.
+    // FC already knows its own roll/pitch from its IMU (far more accurate than our estimate).
+    // Feeding roll/pitch back via ODOMETRY creates a feedback loop:
+    // tiny conversion errors cause EKF3 to "correct" attitude → horizon tilt in MP during yaw.
+    // EK3_SRC1_YAW is typically not 6 (ext nav), so yaw here is informational only.
+    float cy = std::cos(state.yaw * 0.0087266f);  // half-angle: deg * π/360
     float sy = std::sin(state.yaw * 0.0087266f);
-    
-    msg.q[0] = cr * cp * cy + sr * sp * sy;
-    msg.q[1] = sr * cp * cy - cr * sp * sy;
-    msg.q[2] = cr * sp * cy + sr * cp * sy;
-    msg.q[3] = cr * cp * sy - sr * sp * cy;
+    msg.q[0] = cy;   // w
+    msg.q[1] = 0.0f; // x (no roll component)
+    msg.q[2] = 0.0f; // y (no pitch component)
+    msg.q[3] = sy;   // z (yaw only)
     
     return msg;
 }
@@ -1267,8 +1261,17 @@ void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
         // When VO becomes valid again, EKF3 re-acquires on the first valid message.
         bool should_send = vo.valid;
         if (should_send) {
-            auto vis_msg = build_vision_position(state, vo);
-            send_vision_position(vis_msg);
+            // Fix: send ONLY ODOMETRY (#331), NOT VISION_POSITION_ESTIMATE (#102).
+            // Sending both causes ArduPilot EKF3 to fuse the same position twice per cycle:
+            // effective measurement variance halved → innovation gate too tight →
+            // any VO noise triggers rejection → rapid "stopped aiding" cycling.
+            // ODOMETRY already contains position + velocity + covariance + quality.
+            // VISION_POSITION_ESTIMATE is redundant and harmful when sent simultaneously.
+            // Also: accumulate vo_pose internally (was done inside build_vision_position).
+            if (vo.valid) {
+                vo_pose_x_ += vo.dx;
+                vo_pose_y_ += vo.dy;
+            }
 
             auto odom_msg = build_odometry(state, vo);
             send_odometry(odom_msg);
