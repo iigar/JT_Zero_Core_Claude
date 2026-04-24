@@ -1130,14 +1130,20 @@ bool CameraPipeline::tick(float ground_distance) {
             bright_rolling_avg_ = frame_brightness_;
         }
 
-        // Spike detection: current frame >> rolling average (avoid false trigger in darkness)
-        constexpr float SPIKE_FACTOR = 4.0f;
-        constexpr float SPIKE_MIN_AVG = 1.0f;   // don't trigger on absolute zero (lens cap)
-        constexpr int   SPIKE_SUPPRESS = 45;     // ~3s at 15fps
-        if (bright_rolling_avg_ >= SPIKE_MIN_AVG &&
-            frame_brightness_ > bright_rolling_avg_ * SPIKE_FACTOR) {
-            std::printf("[VO] bright spike: %.0f > %.0f*%.0f — suppressing VO %ds\n",
-                        frame_brightness_, bright_rolling_avg_, SPIKE_FACTOR,
+        // Spike detection (symmetric): bright or dark outlier gates VO output
+        // Dark spikes are MORE dangerous: bright=1 gives conf=0.55 (EKF3 trusts it fully)
+        constexpr float SPIKE_UP_FACTOR   = 4.0f;   // bright > avg*4  → too bright
+        constexpr float SPIKE_DOWN_FACTOR = 0.25f;  // bright < avg*0.25 → too dark
+        constexpr float SPIKE_MIN_AVG     = 1.0f;   // don't trigger on absolute zero (lens cap)
+        constexpr int   SPIKE_SUPPRESS    = 45;      // ~3s at 15fps
+        bool is_bright_spike = (bright_rolling_avg_ >= SPIKE_MIN_AVG &&
+                                frame_brightness_ > bright_rolling_avg_ * SPIKE_UP_FACTOR);
+        bool is_dark_spike   = (bright_rolling_avg_ >= SPIKE_MIN_AVG &&
+                                frame_brightness_ < bright_rolling_avg_ * SPIKE_DOWN_FACTOR);
+        if (is_bright_spike || is_dark_spike) {
+            std::printf("[VO] %s spike: bright=%.0f avg=%.0f — suppressing VO %ds\n",
+                        is_bright_spike ? "bright" : "dark",
+                        frame_brightness_, bright_rolling_avg_,
                         SPIKE_SUPPRESS / 15);
             spike_suppress_frames_ = SPIKE_SUPPRESS;
             // Do NOT update rolling avg with spike value
