@@ -709,7 +709,7 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // a systematic position drift (~0.01m/5s) even with hover decay active.
     // Flight maneuvers: |acc| >> 0.1 m/s². Hover/static bias: <0.05 m/s².
     // Threshold 0.05 m/s² catches bias while passing real acceleration.
-    constexpr float IMU_ACCEL_DEADZONE = 0.05f;
+    constexpr float IMU_ACCEL_DEADZONE = 0.10f;
     if (imu_hint_valid_) {
         if (std::fabsf(imu_ax_) > IMU_ACCEL_DEADZONE) kf_vx_ += imu_ax_ * dt;
         if (std::fabsf(imu_ay_) > IMU_ACCEL_DEADZONE) kf_vy_ += imu_ay_ * dt;
