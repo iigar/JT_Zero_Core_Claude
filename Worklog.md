@@ -271,18 +271,40 @@ Pi тягне з `origin` = `JT_Zero_Core_Claude` (мій репо). `claude` re
 
 ---
 
+## Сесія 2026-04-24 (вечір) — EKF3 cycling повністю усунено
+
+### Виконані фікси
+
+| Fix | Проблема | Рішення | Commit |
+|-----|----------|---------|--------|
+| ODOMETRY-only | #102 + #331 = подвійний fusion → innovation gate вдвічі жорсткіший → cycling | Прибрано VISION_POSITION_ESTIMATE, тільки ODOMETRY | 6a2e25e |
+| Yaw-only quaternion | Roll/pitch надсилались назад у FC → feedback loop → horizon нахил при yaw | Quaternion тільки yaw (roll=pitch=0) | 6a2e25e |
+| MAVLink pose reset | mavlink.vo_pose_x_ і camera.pose_x_ — два незалежні акумулятори. reset_vo() скидав тільки camera → 36м/582м знову | reset_vo_pose() в MAVLinkInterface, викликається разом з camera_.reset_vo() | 1653b79 |
+| Armed-only send | VO дрейфує 45м/3хв на нерухомому дроні (bright=9, scale=1m/400px). EKF3 отримував 45м → cycling | should_send = vo.valid && state.armed | f3cb8e7 |
+
+### Налаштовані параметри ArduPilot
+- `EK3_SRC1_VELXY = 0` (було 6) — прибрано velocity fusion
+- `EK3_SRC1_YAW = 1` (compass) — підтверджено
+
+### Підтверджений результат
+- `pose_x=-0.02m pose_y=-0.19m` після ARM ✅
+- Жодного "stopped aiding" cycling ✅
+- "JT0: VO RESET ON ARM" в MP Messages ✅
+
 ## Відкриті задачі
 
 | Пріоритет | Задача |
 |-----------|--------|
-| **NEXT** | Тест LOITER після всіх фіксів (VISO_DELAY_MS=100, PSC=0.5, auto-reset on ARM) |
+| **NEXT** | Тест LOITER в польоті — чи стабільний після всіх фіксів |
 | HIGH | IMU preint std::mutex в T1 @ 200Hz (hot path) |
 | MED | Repo hygiene: прибрати `*.so`, `jt-zero/build/` з git tracking |
 | LOW | Pi deploy: скинути пароль після нового salt |
-| ~~NEXT~~ | ~~VISO_DELAY_MS=100~~ — ЗАКРИТО (встановлено 100, було 80) |
+| ~~HIGH~~ | ~~EKF3 cycling~~ — ЗАКРИТО (armed-only + ODOMETRY-only + pose sync) |
+| ~~HIGH~~ | ~~Horizon нахил при yaw~~ — ЗАКРИТО (yaw-only quat + EK3_SRC1_VELXY=0) |
+| ~~HIGH~~ | ~~"Не армується після довгого стояння"~~ — ЗАКРИТО (зникне без cycling) |
+| ~~NEXT~~ | ~~VISO_DELAY_MS=100~~ — ЗАКРИТО |
 | ~~NEXT~~ | ~~pose_x/y у VO Monitor~~ — ЗАКРИТО |
 | ~~HIGH~~ | ~~C++ thread safety~~ — ЗАКРИТО |
-| ~~HIGH~~ | ~~AGC instability~~ — ЗАКРИТО (gain=1.0) |
+| ~~HIGH~~ | ~~AGC instability~~ — ЗАКРИТО |
 | ~~HIGH~~ | ~~imu_consistency в confidence~~ — ЗАКРИТО |
-| ~~HIGH~~ | ~~ground_dist поріг~~ — ЗАКРИТО (0.1м) |
-| ~~HIGH~~ | ~~EKF3 cycling (582м)~~ — ЗАКРИТО (auto-reset on ARM) |
+| ~~HIGH~~ | ~~ground_dist поріг~~ — ЗАКРИТО |
