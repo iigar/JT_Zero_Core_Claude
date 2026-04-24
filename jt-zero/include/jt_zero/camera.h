@@ -837,7 +837,9 @@ private:
     uint16_t         inject_w_{0};
     uint16_t         inject_h_{0};
     std::atomic<bool> external_fallback_{false};
-    float frame_brightness_{0};  // average pixel brightness 0-255
+    float frame_brightness_{0};       // average pixel brightness 0-255
+    float bright_rolling_avg_{0};     // EMA of brightness (spike baseline)
+    int   spike_suppress_frames_{0};  // frames remaining in spike suppression
     
     // ── Thread-safe feature snapshot (T6 writes with release, Python reads with acquire) ──
     FeaturePoint     features_snapshot_[MAX_FEATURES];

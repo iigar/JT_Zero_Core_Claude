@@ -1119,10 +1119,43 @@ bool CameraPipeline::tick(float ground_distance) {
     if (!active_camera_->capture(current_frame_)) {
         return false;
     }
-    
+
+    // Compute brightness BEFORE VO so spike filter can gate the result
+    {
+        int pixel_count = current_frame_.info.width * current_frame_.info.height;
+        frame_brightness_ = neon::frame_brightness(current_frame_.data, static_cast<size_t>(pixel_count));
+
+        // Warm up rolling average for first ~10 frames
+        if (bright_rolling_avg_ < 1.0f) {
+            bright_rolling_avg_ = frame_brightness_;
+        }
+
+        // Spike detection: current frame >> rolling average (avoid false trigger in darkness)
+        constexpr float SPIKE_FACTOR = 4.0f;
+        constexpr float SPIKE_MIN_AVG = 1.0f;   // don't trigger on absolute zero (lens cap)
+        constexpr int   SPIKE_SUPPRESS = 45;     // ~3s at 15fps
+        if (bright_rolling_avg_ >= SPIKE_MIN_AVG &&
+            frame_brightness_ > bright_rolling_avg_ * SPIKE_FACTOR) {
+            std::printf("[VO] bright spike: %.0f > %.0f*%.0f — suppressing VO %ds\n",
+                        frame_brightness_, bright_rolling_avg_, SPIKE_FACTOR,
+                        SPIKE_SUPPRESS / 15);
+            spike_suppress_frames_ = SPIKE_SUPPRESS;
+            // Do NOT update rolling avg with spike value
+        } else {
+            // EMA update only on non-spike frames
+            bright_rolling_avg_ = 0.9f * bright_rolling_avg_ + 0.1f * frame_brightness_;
+        }
+    }
+
     vo_result_ = vo_.process(current_frame_, ground_distance);
     frame_count_++;
-    
+
+    // Suppress VO output during and after spike
+    if (spike_suppress_frames_ > 0) {
+        vo_result_.valid = false;
+        spike_suppress_frames_--;
+    }
+
     // Copy features to thread-safe snapshot
     {
         size_t fc = vo_.feature_count();
@@ -1130,11 +1163,7 @@ bool CameraPipeline::tick(float ground_distance) {
         std::memcpy(features_snapshot_, vo_.features().data(), fc * sizeof(FeaturePoint));
         features_snapshot_count_.store(static_cast<uint32_t>(fc), std::memory_order_release);
     }
-    
-    // Compute frame brightness using NEON-accelerated sum (for fallback trigger)
-    int pixel_count = current_frame_.info.width * current_frame_.info.height;
-    frame_brightness_ = neon::frame_brightness(current_frame_.data, static_cast<size_t>(pixel_count));
-    
+
     // Monitor confidence for fallback trigger
     if (vo_result_.confidence < fallback_config_.conf_drop_thresh) {
         fallback_state_.low_conf_count++;
