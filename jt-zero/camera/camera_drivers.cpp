@@ -15,6 +15,7 @@
 
 #include "jt_zero/camera.h"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
@@ -137,8 +138,7 @@ bool PiCSICamera::open() {
     const char* shutter_env = std::getenv("JTZERO_SHUTTER");
     const char* gain_env    = std::getenv("JTZERO_GAIN");
     int   shutter_us = shutter_env ? std::atoi(shutter_env) : 20000;
-    float gain_val   = 2.0f;
-    if (gain_env) { std::sscanf(gain_env, "%f", &gain_val); }
+    float gain_val   = gain_env ? static_cast<float>(std::atof(gain_env)) : 2.0f;
 
     char cmd_buf[256];
     std::snprintf(cmd_buf, sizeof(cmd_buf),
