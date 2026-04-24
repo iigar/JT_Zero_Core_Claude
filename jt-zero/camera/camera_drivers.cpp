@@ -122,17 +122,31 @@ bool PiCSICamera::open() {
     }
     
     // Use rpicam-vid to output raw YUV420 frames to stdout
-    // 640x480 at 15fps, fixed shutter 8ms + fixed gain 1.0 for stable VO.
-    // Fixed shutter prevents motion blur and overexposure (bright=181→conf=0.00).
-    // Fixed gain (--gain 1.0 = unity, native sensor sensitivity) eliminates AGC
-    // frame-to-frame transitions: auto gain changes pixel intensities between frames,
-    // breaking LK gradient consistency → conf drops during any light change.
-    // gain=1.0: works for outdoor daytime. Night: VO fallback to thermal camera.
-    // 8ms (1/125s): fast enough for drone motion at typical VO altitudes.
-    const char* cmd = "rpicam-vid --width 640 --height 480 "
-                      "--codec yuv420 --framerate 15 "
-                      "--shutter 8000 --gain 1.0 "
-                      "-t 0 --nopreview -o - 2>/dev/null";
+    // 640x480 at 15fps, fixed shutter + fixed gain for stable VO.
+    // Fixed shutter prevents motion blur and overexposure.
+    // Fixed gain (no AGC) eliminates frame-to-frame intensity changes
+    // that break LK gradient consistency (Fix #54).
+    //
+    // Shutter/gain tuning:
+    //   shutter=8000  (8ms)  + gain=1.0: outdoor daylight
+    //   shutter=20000 (20ms) + gain=2.0: indoor (~50 lux), motion blur <1cm at 0.5m/s hover
+    //   shutter=33333 (33ms) + gain=4.0: very dark indoor (caution: blur at fast moves)
+    //
+    // JTZERO_SHUTTER env var (microseconds, default 20000) and
+    // JTZERO_GAIN env var (float, default 2.0) allow runtime override without rebuild.
+    const char* shutter_env = std::getenv("JTZERO_SHUTTER");
+    const char* gain_env    = std::getenv("JTZERO_GAIN");
+    int   shutter_us = shutter_env ? std::atoi(shutter_env) : 20000;
+    float gain_val   = gain_env    ? std::atof(gain_env)    : 2.0f;
+
+    char cmd_buf[256];
+    std::snprintf(cmd_buf, sizeof(cmd_buf),
+        "rpicam-vid --width 640 --height 480 "
+        "--codec yuv420 --framerate 15 "
+        "--shutter %d --gain %.1f "
+        "-t 0 --nopreview -o - 2>/dev/null",
+        shutter_us, gain_val);
+    const char* cmd = cmd_buf;
     
     pipe_ = popen(cmd, "r");
     if (!pipe_) {
