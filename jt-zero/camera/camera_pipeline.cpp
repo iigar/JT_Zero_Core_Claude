@@ -703,9 +703,16 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     //   v_predicted = v_prev + a * dt
     // This reduces velocity error during fast maneuvers where VO measurement
     // lags behind actual motion.
+    // Fix 57: Dead-zone on IMU Kalman predict — eliminates static bias drift.
+    // When stationary, FC IMU reads a small non-zero acceleration (<0.05 m/s², ~5mg)
+    // from sensor bias or minor frame tilt. Without dead-zone, this accumulates into
+    // a systematic position drift (~0.01m/5s) even with hover decay active.
+    // Flight maneuvers: |acc| >> 0.1 m/s². Hover/static bias: <0.05 m/s².
+    // Threshold 0.05 m/s² catches bias while passing real acceleration.
+    constexpr float IMU_ACCEL_DEADZONE = 0.05f;
     if (imu_hint_valid_) {
-        kf_vx_ += imu_ax_ * dt;
-        kf_vy_ += imu_ay_ * dt;
+        if (std::fabsf(imu_ax_) > IMU_ACCEL_DEADZONE) kf_vx_ += imu_ax_ * dt;
+        if (std::fabsf(imu_ay_) > IMU_ACCEL_DEADZONE) kf_vy_ += imu_ay_ * dt;
     }
 
     // Fix 53a: Kalman velocity decay in confirmed hover.
