@@ -251,17 +251,38 @@ LOIT_SPEED    = 500   ← зменшити (5 м/с)
 
 ---
 
+## Сесія 2026-04-24 (день) — EKF3 cycling fix + RC ch12 + VO Monitor pose
+
+### Виконані задачі
+
+| Fix | Проблема | Рішення | Commit |
+|-----|----------|---------|--------|
+| pose_x/y у VO Monitor | Не було видно чи позиція дрейфує | Додано `pose_x=X.Xm pose_y=X.Xm` у лог кожні 5с | b753bb0 |
+| SET HOMEPOINT ch8→ch12 | ch8 зайнятий, вільний ch12 | `_rc_reset_channel = 11` (0-based) | ce4f38b |
+| EKF3 cycling (582м) | pose_x_ накопичується між польотами → EKF3 отримує 582м → innovation fail → цикл | Auto-reset pose при ARM (disarmed→armed edge) + STATUSTEXT "JT0: VO RESET ON ARM" | 45162a1 |
+
+### Налаштовані параметри ArduPilot (через Mission Planner)
+- `VISO_DELAY_MS = 100` (було 80)
+- `PSC_POSXY_P = 0.5`
+- `LOIT_SPEED = 500`
+
+### Git workflow уточнення
+Pi тягне з `origin` = `JT_Zero_Core_Claude` (мій репо). `claude` remote — дублікат. Workflow: пушу в `claude` remote → Pi робить `git pull` (з origin = той самий репо) → отримує зміни.
+
+---
+
 ## Відкриті задачі
 
 | Пріоритет | Задача |
 |-----------|--------|
-| **NEXT** | Встановити `VISO_DELAY_MS=100` в ArduPilot → тест LOITER |
-| **NEXT** | Додати pose_x_, pose_y_ у VO Monitor для діагностики |
+| **NEXT** | Тест LOITER після всіх фіксів (VISO_DELAY_MS=100, PSC=0.5, auto-reset on ARM) |
+| HIGH | IMU preint std::mutex в T1 @ 200Hz (hot path) |
+| MED | Repo hygiene: прибрати `*.so`, `jt-zero/build/` з git tracking |
+| LOW | Pi deploy: скинути пароль після нового salt |
+| ~~NEXT~~ | ~~VISO_DELAY_MS=100~~ — ЗАКРИТО (встановлено 100, було 80) |
+| ~~NEXT~~ | ~~pose_x/y у VO Monitor~~ — ЗАКРИТО |
 | ~~HIGH~~ | ~~C++ thread safety~~ — ЗАКРИТО |
 | ~~HIGH~~ | ~~AGC instability~~ — ЗАКРИТО (gain=1.0) |
 | ~~HIGH~~ | ~~imu_consistency в confidence~~ — ЗАКРИТО |
 | ~~HIGH~~ | ~~ground_dist поріг~~ — ЗАКРИТО (0.1м) |
-| HIGH | IMU preint std::mutex в T1 @ 200Hz (hot path) |
-| MED | Repo hygiene: прибрати `*.so`, `jt-zero/build/` з git tracking |
-| LOW | Pi deploy: скинути пароль після нового salt |
-| LOW | Pi deploy: після нового salt скинути пароль через `/api/logs/password` |
+| ~~HIGH~~ | ~~EKF3 cycling (582м)~~ — ЗАКРИТО (auto-reset on ARM) |
