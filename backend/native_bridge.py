@@ -112,7 +112,7 @@ class NativeRuntime:
         self._vo_python_features = []  # cached Python-detected features
         
         # ── RC-based VO Reset ──
-        self._rc_reset_channel = 7      # RC channel index (0-based, ch8 on transmitter)
+        self._rc_reset_channel = 11     # RC channel index (0-based, ch12 on transmitter)
         self._rc_reset_threshold = 1700  # PWM threshold to trigger reset
         self._rc_reset_armed = False     # edge detection: only trigger once per switch flip
         
