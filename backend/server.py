@@ -122,12 +122,14 @@ async def _vo_fallback_monitor():
                     src = cam.get('vo_source', '?')
                     bright = cam.get('frame_brightness', -1)
                     # Show rolling average if available
+                    pose_x = getattr(runtime, '_vo_pos_x', 0.0)
+                    pose_y = getattr(runtime, '_vo_pos_y', 0.0)
                     if hasattr(runtime, '_vo_bright_history') and runtime._vo_bright_history:
                         avg_b = sum(runtime._vo_bright_history) / len(runtime._vo_bright_history)
                         n = len(runtime._vo_bright_history)
-                        print(f"[VO Monitor] bright={bright:.0f} avg_b={avg_b:.0f}({n}) conf={conf:.2f} src={src} t={tick_count}", flush=True)
+                        print(f"[VO Monitor] bright={bright:.0f} avg_b={avg_b:.0f}({n}) conf={conf:.2f} src={src} pose_x={pose_x:.2f}m pose_y={pose_y:.2f}m t={tick_count}", flush=True)
                     else:
-                        print(f"[VO Monitor] bright={bright:.0f} conf={conf:.2f} src={src} t={tick_count}", flush=True)
+                        print(f"[VO Monitor] bright={bright:.0f} conf={conf:.2f} src={src} pose_x={pose_x:.2f}m pose_y={pose_y:.2f}m t={tick_count}", flush=True)
                 except Exception as e2:
                     print(f"[VO Monitor] stats error: {e2}", flush=True)
         except Exception as e:
