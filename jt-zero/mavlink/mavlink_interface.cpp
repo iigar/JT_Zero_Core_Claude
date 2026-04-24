@@ -1259,15 +1259,13 @@ void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
         // CAUSES EKF3 cycling (receives → fails innovation check → "stopped aiding" → repeat).
         // Stopping completely lets EKF3 time out once and cleanly fall back to IMU-only.
         // When VO becomes valid again, EKF3 re-acquires on the first valid message.
-        bool should_send = vo.valid;
+        // Only send when armed AND VO is valid.
+        // On the ground (disarmed), VO position drifts due to noise/vibration
+        // (e.g. 45m in 3min at bright=9 on floor). Sending this to EKF3 causes
+        // innovation failure and "stopped aiding" cycling.
+        // ARM auto-reset fires first (pose→0), so first armed packet is always (0,0,0).
+        bool should_send = vo.valid && state.armed;
         if (should_send) {
-            // Fix: send ONLY ODOMETRY (#331), NOT VISION_POSITION_ESTIMATE (#102).
-            // Sending both causes ArduPilot EKF3 to fuse the same position twice per cycle:
-            // effective measurement variance halved → innovation gate too tight →
-            // any VO noise triggers rejection → rapid "stopped aiding" cycling.
-            // ODOMETRY already contains position + velocity + covariance + quality.
-            // VISION_POSITION_ESTIMATE is redundant and harmful when sent simultaneously.
-            // Also: accumulate vo_pose internally (was done inside build_vision_position).
             if (vo.valid) {
                 vo_pose_x_ += vo.dx;
                 vo_pose_y_ += vo.dy;
