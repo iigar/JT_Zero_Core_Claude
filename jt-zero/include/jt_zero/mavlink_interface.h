@@ -257,6 +257,9 @@ public:
     
     // Send STATUSTEXT message (severity: 0=EMERGENCY..6=INFO)
     bool send_statustext(uint8_t severity, const char* text);
+
+    // Reset accumulated VO pose to (0,0,0) — call on vo_reset / ARM
+    void reset_vo_pose() { vo_pose_x_ = 0.0f; vo_pose_y_ = 0.0f; }
     
     // Build messages from runtime state
     MAVVisionPositionEstimate build_vision_position(const SystemState& state, const VOResult& vo);

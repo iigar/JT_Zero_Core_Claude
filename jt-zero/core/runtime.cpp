@@ -235,6 +235,7 @@ bool Runtime::send_command(const char* cmd, float param1, float param2) {
             update_safety_snapshot();
         } else if (std::strcmp(cmd, "vo_reset") == 0) {
             camera_.reset_vo();
+            mavlink_.reset_vo_pose();  // sync MAVLink pose accumulator with camera reset
             e.set_message("VO origin reset (SET HOMEPOINT)");
         }
     }
