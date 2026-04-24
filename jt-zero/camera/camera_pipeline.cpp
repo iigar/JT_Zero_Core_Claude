@@ -905,15 +905,20 @@ void VisualOdometry::reset() {
     total_distance_ = 0;
     kf_vx_ = 0;
     kf_vy_ = 0;
+    kf_vx_prev_ = 0;
+    kf_vy_prev_ = 0;
     kf_vx_var_ = 1.0f;
     kf_vy_var_ = 1.0f;
+    pose_var_x_ = 1.0f;
+    pose_var_y_ = 1.0f;
     running_confidence_ = 0.5f;
+    vo_valid_stable_ = false;
+    valid_frames_count_ = 0;
+    invalid_frames_count_ = 0;
     imu_hint_valid_ = false;
     yaw_hint_valid_ = false;
     current_altitude_ = 0;
-    // Reset hover state
     hover_ = HoverState{};
-    // Reset adaptive params to profile defaults
     update_adaptive_params();
 }
 
