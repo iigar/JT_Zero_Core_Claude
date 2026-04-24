@@ -295,15 +295,14 @@ Pi тягне з `origin` = `JT_Zero_Core_Claude` (мій репо). `claude` re
 
 | Пріоритет | Задача |
 |-----------|--------|
-| **NEXT** | Тест LOITER в польоті — чи стабільний після всіх фіксів |
-| HIGH | IMU preint std::mutex в T1 @ 200Hz (hot path) |
+| **BLOCKER** | Вібраційна ізоляція камери — камера жорстко на карбоні впритул до мотора → conf=0.09 в польоті. Потрібна foam/гума 2-4мм між камерою і кронштейном |
+| HIGH | Після hw-fix: тест LOITER з вібраційною ізоляцією |
 | MED | Repo hygiene: прибрати `*.so`, `jt-zero/build/` з git tracking |
 | LOW | Pi deploy: скинути пароль після нового salt |
-| ~~HIGH~~ | ~~EKF3 cycling~~ — ЗАКРИТО (armed-only + ODOMETRY-only + pose sync) |
-| ~~HIGH~~ | ~~Horizon нахил при yaw~~ — ЗАКРИТО (yaw-only quat + EK3_SRC1_VELXY=0) |
-| ~~HIGH~~ | ~~"Не армується після довгого стояння"~~ — ЗАКРИТО (зникне без cycling) |
-| ~~NEXT~~ | ~~VISO_DELAY_MS=100~~ — ЗАКРИТО |
-| ~~NEXT~~ | ~~pose_x/y у VO Monitor~~ — ЗАКРИТО |
+| ~~HIGH~~ | ~~IMU preint std::mutex~~ — mutex overhead незначний (10-30нс при 200Hz), не блокер |
+| ~~NEXT~~ | ~~Тест LOITER~~ — діагностовано: проблема не в коді, а в hw вібрації |
+| ~~HIGH~~ | ~~EKF3 cycling~~ — ЗАКРИТО |
+| ~~HIGH~~ | ~~Horizon нахил при yaw~~ — ЗАКРИТО |
 | ~~HIGH~~ | ~~C++ thread safety~~ — ЗАКРИТО |
 | ~~HIGH~~ | ~~AGC instability~~ — ЗАКРИТО |
 | ~~HIGH~~ | ~~imu_consistency в confidence~~ — ЗАКРИТО |
