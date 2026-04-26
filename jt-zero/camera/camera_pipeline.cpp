@@ -840,16 +840,31 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // Fix 3: pass gyro_z so hover state can estimate IMU bias during stationary hover
     update_hover_state(median_dx, median_dy, dt, imu_gz_);
 
-    // Fix #60: update VO velocity bias EMA during stable hover.
-    // raw_vx/raw_vy are the original unmodified VO measurements — bias converges to their
-    // steady-state value in hover, cancelling camera tilt + floor texture effects.
-    if (hover_.is_hovering && hover_.hover_duration_sec >= MIN_HOVER_FOR_BIAS) {
-        if (std::fabsf(raw_vx) < VEL_BIAS_GATE) {
+    // Fix #61: two-tier VO velocity bias calibration.
+    // Problem with Fix #60: hover_.is_hovering requires motion_avg < 0.5px for 30 frames.
+    // In LOITER flight the drone oscillates → VO sees 1-3px motion → hover never detected →
+    // bias stays 0 throughout entire flight. On dark floor (bright=1-2) hover IS detected
+    // but raw_vx≈0 → bias calibrates to 0 (useless, and corrupts any prior calibration).
+    //
+    // Solution: add a slow continuous path (alpha=0.001) that works during general flight.
+    // Both paths require brightness >= BIAS_MIN_BRIGHTNESS to prevent dark-floor corruption.
+    //
+    // Fast path: confirmed hover + camera working → alpha=0.005 (~30s settle)
+    if (hover_.is_hovering && hover_.hover_duration_sec >= MIN_HOVER_FOR_BIAS
+        && frame_brightness_ >= BIAS_MIN_BRIGHTNESS) {
+        if (std::fabsf(raw_vx) < VEL_BIAS_GATE)
             vx_bias_ += (raw_vx - vx_bias_) * VEL_BIAS_ALPHA;
-        }
-        if (std::fabsf(raw_vy) < VEL_BIAS_GATE) {
+        if (std::fabsf(raw_vy) < VEL_BIAS_GATE)
             vy_bias_ += (raw_vy - vy_bias_) * VEL_BIAS_ALPHA;
-        }
+    }
+    // Slow path: any valid VO with camera seeing real features → alpha=0.001 (~67s settle)
+    // Fires during LOITER flight where hover detection fails due to controller oscillations.
+    // VEL_BIAS_GATE excludes fast maneuvers; over long LOITER the EMA converges to bias.
+    else if (result.valid && frame_brightness_ >= BIAS_MIN_BRIGHTNESS) {
+        if (std::fabsf(raw_vx) < VEL_BIAS_GATE)
+            vx_bias_ += (raw_vx - vx_bias_) * VEL_BIAS_ALPHA_SLOW;
+        if (std::fabsf(raw_vy) < VEL_BIAS_GATE)
+            vy_bias_ += (raw_vy - vy_bias_) * VEL_BIAS_ALPHA_SLOW;
     }
 
     result.hover_detected = hover_.is_hovering;
@@ -1172,8 +1187,12 @@ bool CameraPipeline::tick(float ground_distance) {
     frame_count_++;
 
     // Suppress VO output during and after spike
+    // Fix #62: also zero dx/dy so Python trail accumulation and MAVLink sender
+    // don't integrate bad displacement even when valid=false.
     if (spike_suppress_frames_ > 0) {
         vo_result_.valid = false;
+        vo_result_.dx = 0.0f;
+        vo_result_.dy = 0.0f;
         spike_suppress_frames_--;
     }
 

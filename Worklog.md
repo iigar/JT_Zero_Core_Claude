@@ -400,13 +400,51 @@ Drift 0.23 м/хв з моторами → EKF3 думає дрон рухаєт
 - `backend/native_bridge.py` — `_vo_bias_tick()`, `_check_rc_vo_reset()` differentiation
 - `backend/server.py` — VO Monitor лог + vx_bias/vy_bias
 
+---
+
+## Сесія 2026-04-27 — Fix #61: bias calibration в реальному LOITER польоті
+
+### Аналіз логів Fix #60
+
+З логів `uvicorn[976]` та `uvicorn[1409]` (тест 2026-04-26):
+- `vx_bias=0.000 vy_bias=0.000` весь час — Fix #60 **ніколи не спрацював**
+- Причина: `hover_.is_hovering` потребує `micro_motion_avg < 0.5px` за 30+ кадрів
+- LOITER контролер постійно коригує → VO бачить 1-3px → hover НІКОЛИ не детектується в польоті
+- На темній підлозі (bright=1-2): hover детектується, але `raw_vx≈0` (LK нічого не трекує)
+  → bias "калібрується" до 0, знищуючи будь-яку попередню калібровку
+
+Позитивне: Y drift в **темряві = 0** (pose заморожений hover decay) ✓ — Fix #57 deadzone працює.
+
+### Fix #61 — двошаровий bias EMA
+
+**Проблема Fix #60:** single hover gate несумісна з LOITER flight.
+
+**Рішення:** два шляхи, обидва вимагають `frame_brightness_ >= BIAS_MIN_BRIGHTNESS (=4)`:
+- **Fast path** (α=0.005, ~30с): hover підтверджений + brightness OK (попередня поведінка, але з brightness gate)
+- **Slow path** (α=0.001, ~67с): будь-який valid VO + brightness OK → спрацьовує під час LOITER
+
+`BIAS_MIN_BRIGHTNESS=4`: темна підлога bright=1-2 < 4 → OFF (bias не псується), польот bright=5-20 ≥ 4 → ON.
+
+Settling time slow path: 1/0.001 × (1/15fps) ≈ 67с → за 1-2хв LOITER vy_bias ≈ 80% реального значення.
+
+**Файли змінено:**
+- `jt-zero/include/jt_zero/camera.h` — додано `VEL_BIAS_ALPHA_SLOW=0.001f`, `BIAS_MIN_BRIGHTNESS=4`
+- `jt-zero/camera/camera_pipeline.cpp:843-868` — двошаровий блок замість single hover gate
+
+**Очікуємо в наступному тесті:**
+- `vx_bias` і `vy_bias` починають накопичуватись в перші 30с польоту (bright≥4)
+- За ~2хв LOITER: STATUSTEXT `"JT0: VO BIAS CALIB X=... Y=..."` в Mission Planner
+- Y drift в LOITER значно менший (< 0.1 м/хв замість 0.55)
+
+---
+
 ## Відкриті задачі
 
 | Пріоритет | Задача |
 |-----------|--------|
-| **NEXT** | Pi rebuild + тест Fix #58/#59/#60. `cd ~/jt-zero && git pull && cd jt-zero/build && make -j4 && cp jtzero_native*.so ~/jt-zero/backend/ && sudo systemctl restart jtzero` |
-| **NEXT** | Verify: `journalctl -u jtzero -f \| grep -E "vx_bias\|vy_bias\|spike\|BIAS CALIB"`. Очікуємо STATUSTEXT після 30с hover. |
-| **HIGH** | Motor drift 0.23 м/хв — після Fix #60 перевірити чи зменшився. Y drift має зникнути після bias calibration ~30с. |
+| **NEXT** | Pi rebuild + тест Fix #61. Команди на Pi: `cd ~/jt-zero && git pull && cd jt-zero/build && make -j4 && cp jtzero_native*.so ~/jt-zero/backend/ && sudo systemctl restart jtzero` |
+| **NEXT** | Verify: в польоті `journalctl -u jtzero \| grep "vx_bias"` — має показати ненульове значення після 30-60с |
+| **HIGH** | Очікуємо STATUSTEXT `"JT0: VO BIAS CALIB"` за ~2хв LOITER |
 | MED | Repo hygiene: прибрати `*.so`, `jt-zero/build/` з git tracking |
 | LOW | Pi deploy: скинути пароль після нового salt |
 | ~~HIGH~~ | ~~Bright spike → 13м~~ — ЗАКРИТО Fix #58 |

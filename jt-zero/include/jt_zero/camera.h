@@ -567,9 +567,11 @@ private:
     // Persists across reset() — physical calibration, clear only via clear_velocity_bias().
     float vx_bias_{0};
     float vy_bias_{0};
-    static constexpr float VEL_BIAS_ALPHA     = 0.005f;  // ~30s settle at 15fps
-    static constexpr float VEL_BIAS_GATE      = 0.5f;    // m/s sanity — skip during fast motion
-    static constexpr float MIN_HOVER_FOR_BIAS = 5.0f;    // sec stable hover before calibrating
+    static constexpr float VEL_BIAS_ALPHA      = 0.005f;  // ~30s settle at 15fps (fast: confirmed hover)
+    static constexpr float VEL_BIAS_ALPHA_SLOW = 0.001f; // ~67s settle at 15fps (slow: general flight)
+    static constexpr float VEL_BIAS_GATE       = 0.5f;   // m/s gate — skip during fast maneuvers
+    static constexpr float MIN_HOVER_FOR_BIAS  = 5.0f;   // sec stable hover before fast-path fires
+    static constexpr int   BIAS_MIN_BRIGHTNESS = 4;       // camera must see something (>dark floor bright=1-2)
 
     // Median + MAD computation helpers
     static float compute_median(float* arr, int n);
