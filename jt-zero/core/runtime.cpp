@@ -237,6 +237,9 @@ bool Runtime::send_command(const char* cmd, float param1, float param2) {
             camera_.reset_vo();
             mavlink_.reset_vo_pose();  // sync MAVLink pose accumulator with camera reset
             e.set_message("VO origin reset (SET HOMEPOINT)");
+        } else if (std::strcmp(cmd, "clear_bias") == 0) {
+            camera_.clear_velocity_bias();
+            e.set_message("VO velocity bias cleared");
         }
     }
 

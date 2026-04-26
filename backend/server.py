@@ -127,9 +127,13 @@ async def _vo_fallback_monitor():
                     if hasattr(runtime, '_vo_bright_history') and runtime._vo_bright_history:
                         avg_b = sum(runtime._vo_bright_history) / len(runtime._vo_bright_history)
                         n = len(runtime._vo_bright_history)
-                        print(f"[VO Monitor] bright={bright:.0f} avg_b={avg_b:.0f}({n}) conf={conf:.2f} src={src} pose_x={pose_x:.2f}m pose_y={pose_y:.2f}m t={tick_count}", flush=True)
+                        vx_bias = cam.get('vx_bias', 0.0)
+                        vy_bias = cam.get('vy_bias', 0.0)
+                        print(f"[VO Monitor] bright={bright:.0f} avg_b={avg_b:.0f}({n}) conf={conf:.2f} src={src} pose_x={pose_x:.2f}m pose_y={pose_y:.2f}m vx_bias={vx_bias:.3f} vy_bias={vy_bias:.3f} t={tick_count}", flush=True)
                     else:
-                        print(f"[VO Monitor] bright={bright:.0f} conf={conf:.2f} src={src} pose_x={pose_x:.2f}m pose_y={pose_y:.2f}m t={tick_count}", flush=True)
+                        vx_bias = cam.get('vx_bias', 0.0)
+                        vy_bias = cam.get('vy_bias', 0.0)
+                        print(f"[VO Monitor] bright={bright:.0f} conf={conf:.2f} src={src} pose_x={pose_x:.2f}m pose_y={pose_y:.2f}m vx_bias={vx_bias:.3f} vy_bias={vy_bias:.3f} t={tick_count}", flush=True)
                 except Exception as e2:
                     print(f"[VO Monitor] stats error: {e2}", flush=True)
         except Exception as e:

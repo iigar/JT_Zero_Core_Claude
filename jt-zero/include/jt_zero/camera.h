@@ -484,6 +484,11 @@ public:
     const PlatformConfig& platform() const { return platform_; }
     const VOMode& vo_mode() const { return vo_mode_; }
 
+    // Fix #60: VO velocity bias accessors
+    float vx_bias() const { return vx_bias_; }
+    float vy_bias() const { return vy_bias_; }
+    void  clear_velocity_bias() { vx_bias_ = 0; vy_bias_ = 0; }
+
 private:
     FASTDetector detector_;
     LKTracker    tracker_;
@@ -556,7 +561,16 @@ private:
     bool  yaw_hint_valid_{false};
     // Fix 3: gyro_z passed so hover can estimate IMU bias (in true hover rotation = 0)
     void update_hover_state(float median_dx, float median_dy, float dt, float gyro_z);
-    
+
+    // Fix #60: VO velocity bias (camera tilt + floor texture → systematic raw_v ≠ 0 in hover)
+    // EMA estimated during stable hover, subtracted from raw_v BEFORE Kalman update.
+    // Persists across reset() — physical calibration, clear only via clear_velocity_bias().
+    float vx_bias_{0};
+    float vy_bias_{0};
+    static constexpr float VEL_BIAS_ALPHA     = 0.005f;  // ~30s settle at 15fps
+    static constexpr float VEL_BIAS_GATE      = 0.5f;    // m/s sanity — skip during fast motion
+    static constexpr float MIN_HOVER_FOR_BIAS = 5.0f;    // sec stable hover before calibrating
+
     // Median + MAD computation helpers
     static float compute_median(float* arr, int n);
     static float compute_mad(float* arr, int n, float median);
@@ -680,6 +694,9 @@ struct CameraPipelineStats {
     uint32_t   vo_fallback_switches{0};
     // Frame brightness (for fallback trigger — dark camera detection)
     float      frame_brightness{0};    // average pixel value 0-255
+    // Fix #60: VO velocity bias (camera tilt + floor texture calibration)
+    float      vx_bias{0};             // m/s, estimated horizontal bias
+    float      vy_bias{0};             // m/s, estimated vertical bias
 };
 
 class CameraPipeline {
@@ -744,6 +761,11 @@ public:
     void accumulate_gyro(float gx, float gy, float gz, float dt) {
         vo_.accumulate_gyro(gx, gy, gz, dt);
     }
+
+    // Fix #60: VO velocity bias accessors + reset (for RC ch12 disarmed full-calibration reset)
+    float vx_bias() const { return vo_.vx_bias(); }
+    float vy_bias() const { return vo_.vy_bias(); }
+    void  clear_velocity_bias() { vo_.clear_velocity_bias(); }
     
     // ── Multi-camera support ──
     

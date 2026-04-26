@@ -367,12 +367,46 @@ Drift 0.23 м/хв з моторами → EKF3 думає дрон рухаєт
 
 **Варіанти:** потрібне обговорення з Ігорем.
 
+---
+
+## Сесія 2026-04-26 — Fix #60 VO velocity bias auto-calibration + push #58/#59
+
+### Задеплоєно
+
+**Fix #58 + #59** (bright/dark spike filters, commits `ad34183`/`5c60c77`) → запушено в `claude` remote. Pi ще потребує `git pull + rebuild`.
+
+### Fix #60 — VO velocity bias auto-calibration в hover
+
+**Проблема:** LOITER Y drift 0.55 м/хв з моторами (0.10 м/хв статика). Причини:
+- Камера нахилена ~5° pitch → raw_vy ≠ 0 навіть у hover
+- Floor texture bias (флорентійський ламінат) дає аналогічний ефект
+- Hover decay `kf_vy_ *= 0.85f` (Fix #53a) безпорадний — VO update `kf_vy_ += K*(raw_vy - kf_vy_)` одразу повертає bias в state
+
+**Рішення (mirror Fix #38 gyro_z_bias model):**
+- `vx_bias_`, `vy_bias_` — EMA members у VisualOdometry (persist через `reset()`)
+- Hover gate: `is_hovering && hover_duration >= 5s && |raw_v| < 0.5 m/s`
+- EMA α=0.005 (~30с settling), subtract ПЕРЕД Kalman: `kf_vx_ += Kx*(raw_vx - vx_bias_ - kf_vx_)`
+- STATUSTEXT `"JT0: VO BIAS CALIB X=0.XXX Y=0.XXX"` при стабілізації (Python polling)
+
+**RC ch12 differentiation:**
+- disarmed: full reset (pose + bias) → "JT0: FULL CALIB RESET"
+- armed: pose only → "JT0: SET HOMEPOINT (in-flight)"
+
+**Файли змінено:**
+- `jt-zero/include/jt_zero/camera.h` — private `vx_bias_/vy_bias_`, public accessors/clear, CameraPipelineStats + CameraPipeline wrappers
+- `jt-zero/camera/camera_pipeline.cpp` — Phase 2 subtract, Phase 5 EMA, get_stats() fill
+- `jt-zero/api/python_bindings.cpp` — `vx_bias`/`vy_bias` у camera dict
+- `jt-zero/core/runtime.cpp` — команда `"clear_bias"`
+- `backend/native_bridge.py` — `_vo_bias_tick()`, `_check_rc_vo_reset()` differentiation
+- `backend/server.py` — VO Monitor лог + vx_bias/vy_bias
+
 ## Відкриті задачі
 
 | Пріоритет | Задача |
 |-----------|--------|
-| **NEXT** | Pi rebuild + тест Fix #58 (bright spike filter). Команда: `cd ~/jt-zero/jt-zero && cd build && make -j4 && cp jtzero_native*.so ~/jt-zero/backend/ && sudo systemctl restart jtzero` |
-| **HIGH** | Motor drift 0.23 м/хв → LOITER нестабільний. Варіанти: більше ізоляції, EKF3 параметри, VO bias correction |
+| **NEXT** | Pi rebuild + тест Fix #58/#59/#60. `cd ~/jt-zero && git pull && cd jt-zero/build && make -j4 && cp jtzero_native*.so ~/jt-zero/backend/ && sudo systemctl restart jtzero` |
+| **NEXT** | Verify: `journalctl -u jtzero -f \| grep -E "vx_bias\|vy_bias\|spike\|BIAS CALIB"`. Очікуємо STATUSTEXT після 30с hover. |
+| **HIGH** | Motor drift 0.23 м/хв — після Fix #60 перевірити чи зменшився. Y drift має зникнути після bias calibration ~30с. |
 | MED | Repo hygiene: прибрати `*.so`, `jt-zero/build/` з git tracking |
 | LOW | Pi deploy: скинути пароль після нового salt |
 | ~~HIGH~~ | ~~Bright spike → 13м~~ — ЗАКРИТО Fix #58 |

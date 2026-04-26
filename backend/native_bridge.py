@@ -115,6 +115,13 @@ class NativeRuntime:
         self._rc_reset_channel = 11     # RC channel index (0-based, ch12 on transmitter)
         self._rc_reset_threshold = 1700  # PWM threshold to trigger reset
         self._rc_reset_armed = False     # edge detection: only trigger once per switch flip
+        # Fix #60: VO velocity bias STATUSTEXT — fire once when bias stabilises
+        self._bias_prev_vx = 0.0
+        self._bias_prev_vy = 0.0
+        self._bias_stable_ticks = 0
+        self._bias_announced = False
+        self._BIAS_STABLE_THRESH = 0.001   # m/s delta per tick to count as stable
+        self._BIAS_STABLE_TICKS  = 50      # 5s @ 10Hz before announcing
 
         # ── Auto-reset VO pose on ARM ──
         self._prev_armed = False        # edge detection: reset pose on disarmed→armed transition
@@ -342,7 +349,8 @@ class NativeRuntime:
     # ── VO Fallback: Python-side monitoring + injection ──
 
     def _check_rc_vo_reset(self):
-        """Check RC channel for SET HOMEPOINT trigger (edge-detected)."""
+        """Check RC channel for SET HOMEPOINT trigger (edge-detected).
+        Fix #60: disarmed → full reset (pose + bias); armed → pose only."""
         try:
             mavlink = dict(self._rt.get_mavlink())
             rc = mavlink.get('rc_channels')
@@ -352,11 +360,23 @@ class NativeRuntime:
             if pwm >= self._rc_reset_threshold:
                 if not self._rc_reset_armed:
                     self._rc_reset_armed = True
-                    # Trigger vo_reset
+                    state = dict(self._rt.get_state())
+                    armed = state.get('armed', False)
                     self._rt.send_command("vo_reset", 0, 0)
-                    self._vo_trail = []  # clear trail on reset
-                    self._send_statustext(6, "JT0: RC HOMEPOINT SET")
-                    sys.stderr.write(f"[VO Reset] RC ch{self._rc_reset_channel + 1} = {pwm} >= {self._rc_reset_threshold} → HOMEPOINT SET\n")
+                    self._vo_trail = []
+                    self._vo_pos_x = 0.0
+                    self._vo_pos_y = 0.0
+                    self._vo_pos_z = 0.0
+                    if armed:
+                        self._send_statustext(6, "JT0: SET HOMEPOINT (in-flight)")
+                        sys.stderr.write(f"[VO Reset] RC ch{self._rc_reset_channel + 1} armed → pose reset\n")
+                    else:
+                        # Full calibration reset: also clear velocity bias
+                        self._rt.send_command("clear_bias", 0, 0)
+                        self._bias_announced = False
+                        self._bias_stable_ticks = 0
+                        self._send_statustext(6, "JT0: FULL CALIB RESET")
+                        sys.stderr.write(f"[VO Reset] RC ch{self._rc_reset_channel + 1} disarmed → full reset (pose+bias)\n")
                     sys.stderr.flush()
             else:
                 self._rc_reset_armed = False
@@ -400,6 +420,9 @@ class NativeRuntime:
         
         # ── RC-based VO Reset (always active, not just during fallback) ──
         self._check_rc_vo_reset()
+
+        # Fix #60: monitor VO velocity bias stabilisation → STATUSTEXT
+        self._vo_bias_tick()
 
         # ── Auto-reset VO pose on ARM (disarmed→armed edge) ──
         # pose_x_/y_ accumulate continuously — on ground between flights they drift.
@@ -537,6 +560,31 @@ class NativeRuntime:
             else:
                 # Bad probe — reset good probe counter
                 self._vo_csi_good_probes = 0
+
+    def _vo_bias_tick(self):
+        """Fix #60: poll VO velocity bias from C++ and send one STATUSTEXT when stable."""
+        if self._bias_announced:
+            return
+        try:
+            cam = dict(self._rt.get_camera())
+            vx = cam.get('vx_bias', 0.0)
+            vy = cam.get('vy_bias', 0.0)
+            if (abs(vx - self._bias_prev_vx) < self._BIAS_STABLE_THRESH and
+                    abs(vy - self._bias_prev_vy) < self._BIAS_STABLE_THRESH and
+                    (abs(vx) > 0.0001 or abs(vy) > 0.0001)):
+                self._bias_stable_ticks += 1
+                if self._bias_stable_ticks >= self._BIAS_STABLE_TICKS:
+                    self._bias_announced = True
+                    msg = f"JT0: VO BIAS CALIB X={vx:.3f} Y={vy:.3f}"
+                    self._send_statustext(6, msg)
+                    sys.stderr.write(f"[VO Bias] {msg}\n")
+                    sys.stderr.flush()
+            else:
+                self._bias_stable_ticks = 0
+            self._bias_prev_vx = vx
+            self._bias_prev_vy = vy
+        except Exception:
+            pass
 
     def gps_warn_tick(self):
         """Called periodically (~1Hz from background monitor).

@@ -184,7 +184,10 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
         "vo_fallback_reason"_a = std::string(cs.vo_fallback_reason),
         "vo_fallback_duration"_a = cs.vo_fallback_duration,
         "vo_fallback_switches"_a = cs.vo_fallback_switches,
-        "frame_brightness"_a = cs.frame_brightness
+        "frame_brightness"_a = cs.frame_brightness,
+        // Fix #60: VO velocity bias
+        "vx_bias"_a = cs.vx_bias,
+        "vy_bias"_a = cs.vy_bias
     );
 }
 

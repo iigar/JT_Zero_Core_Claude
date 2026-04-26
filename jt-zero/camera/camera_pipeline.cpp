@@ -734,8 +734,11 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // Update (VO measurement corrects IMU-predicted state)
     float Kx = kf_vx_var_ / (kf_vx_var_ + R);
     float Ky = kf_vy_var_ / (kf_vy_var_ + R);
-    kf_vx_ += Kx * (raw_vx - kf_vx_);
-    kf_vy_ += Ky * (raw_vy - kf_vy_);
+    // Fix #60: subtract systematic VO velocity bias BEFORE Kalman update.
+    // Camera tilt ~5° pitch + floor texture → raw_vy ≠ 0 even in hover.
+    // raw_vx unchanged so Phase 5 EMA can sample the original measurement.
+    kf_vx_ += Kx * (raw_vx - vx_bias_ - kf_vx_);
+    kf_vy_ += Ky * (raw_vy - vy_bias_ - kf_vy_);
     kf_vx_var_ *= (1.0f - Kx);
     kf_vy_var_ *= (1.0f - Ky);
 
@@ -836,7 +839,19 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
 
     // Fix 3: pass gyro_z so hover state can estimate IMU bias during stationary hover
     update_hover_state(median_dx, median_dy, dt, imu_gz_);
-    
+
+    // Fix #60: update VO velocity bias EMA during stable hover.
+    // raw_vx/raw_vy are the original unmodified VO measurements — bias converges to their
+    // steady-state value in hover, cancelling camera tilt + floor texture effects.
+    if (hover_.is_hovering && hover_.hover_duration_sec >= MIN_HOVER_FOR_BIAS) {
+        if (std::fabsf(raw_vx) < VEL_BIAS_GATE) {
+            vx_bias_ += (raw_vx - vx_bias_) * VEL_BIAS_ALPHA;
+        }
+        if (std::fabsf(raw_vy) < VEL_BIAS_GATE) {
+            vy_bias_ += (raw_vy - vy_bias_) * VEL_BIAS_ALPHA;
+        }
+    }
+
     result.hover_detected = hover_.is_hovering;
     result.hover_duration = hover_.hover_duration_sec;
     result.yaw_drift_rate = hover_.yaw_drift_rate;
@@ -1455,7 +1470,10 @@ CameraPipelineStats CameraPipeline::get_stats() const {
     stats.vo_fallback_duration = fallback_state_.fallback_duration;
     stats.vo_fallback_switches = fallback_state_.total_switches;
     stats.frame_brightness = frame_brightness_;
-    
+    // Fix #60: VO velocity bias
+    stats.vx_bias = vo_.vx_bias();
+    stats.vy_bias = vo_.vy_bias();
+
     return stats;
 }
 
