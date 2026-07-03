@@ -9,6 +9,7 @@ import math
 import sys
 import os
 import io
+import asyncio
 import threading
 import subprocess
 
@@ -181,6 +182,36 @@ class NativeRuntime:
                 self._rt.send_statustext(severity, text)
         except Exception:
             pass
+
+    async def read_fc_param(self, name: str, timeout: float = 2.0) -> dict:
+        """Read a single FC parameter by name via MAVLink PARAM_REQUEST_READ.
+
+        Sends the request, then polls the C++ param cache (filled by the
+        PARAM_VALUE handler on the MAVLink thread) until the value arrives or
+        timeout. Returns {"name", "value"} or {"name", "value": None, "error"}.
+        """
+        if not (hasattr(self._rt, 'request_param') and hasattr(self._rt, 'get_param')):
+            return {"name": name, "value": None, "error": "param read not supported by runtime"}
+        try:
+            # Check cache first (may already be present from a prior request)
+            cached = self._rt.get_param(name)
+            if cached is not None:
+                return {"name": name, "value": float(cached)}
+            # Send request, then poll. Re-request a few times in case of packet loss.
+            deadline = time.time() + timeout
+            attempt = 0
+            while time.time() < deadline:
+                if attempt % 5 == 0:  # (re)send every ~0.5s
+                    self._rt.request_param(name)
+                attempt += 1
+                await asyncio.sleep(0.1)
+                val = self._rt.get_param(name)
+                if val is not None:
+                    return {"name": name, "value": float(val)}
+            return {"name": name, "value": None, "error": "timeout — no PARAM_VALUE from FC"}
+        except Exception as e:
+            sys.stderr.write(f"[read_fc_param] error: {e}\n")
+            return {"name": name, "value": None, "error": str(e)}
     
     def get_state(self) -> dict:
         state = dict(self._rt.get_state())

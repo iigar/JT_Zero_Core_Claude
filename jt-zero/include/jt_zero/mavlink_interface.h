@@ -23,6 +23,8 @@ namespace jtzero {
 
 enum class MAVMsgType : uint16_t {
     HEARTBEAT                  = 0,
+    PARAM_REQUEST_READ         = 20,
+    PARAM_VALUE                = 22,
     ATTITUDE                   = 30,
     GLOBAL_POSITION_INT        = 33,
     GPS_RAW_INT                = 24,
@@ -39,6 +41,8 @@ enum class MAVMsgType : uint16_t {
 inline const char* mavmsg_str(MAVMsgType t) {
     switch(t) {
         case MAVMsgType::HEARTBEAT: return "HEARTBEAT";
+        case MAVMsgType::PARAM_REQUEST_READ: return "PARAM_REQ_READ";
+        case MAVMsgType::PARAM_VALUE: return "PARAM_VALUE";
         case MAVMsgType::ATTITUDE: return "ATTITUDE";
         case MAVMsgType::GLOBAL_POSITION_INT: return "GLOBAL_POS";
         case MAVMsgType::GPS_RAW_INT: return "GPS_RAW";
@@ -216,6 +220,14 @@ struct FCTelemetry {
     bool     rc_valid{false};
 };
 
+// ─── FC Parameter (read-only cache) ──────────────────────
+
+struct FCParam {
+    char    name[17]{};   // param_id (16 chars) + null terminator
+    float   value{0};
+    uint8_t type{0};      // MAV_PARAM_TYPE
+};
+
 // ─── RAII Spinlock Guard ─────────────────────────────────
 
 struct ScopedSpinLock {
@@ -257,6 +269,14 @@ public:
     
     // Send STATUSTEXT message (severity: 0=EMERGENCY..6=INFO)
     bool send_statustext(uint8_t severity, const char* text);
+
+    // ── FC parameter read (PARAM_REQUEST_READ / PARAM_VALUE) ──
+    // Request a single param from FC by name (async: reply arrives via PARAM_VALUE).
+    bool request_param(const char* name);
+    // Read cached param value (filled by PARAM_VALUE handler). Returns false if not yet received.
+    bool get_param(const char* name, float& out) const;
+    // Number of params currently cached.
+    size_t param_cache_count() const;
 
     // Reset accumulated VO pose to (0,0,0) — call on vo_reset / ARM
     void reset_vo_pose() { vo_pose_x_ = 0.0f; vo_pose_y_ = 0.0f; }
@@ -333,6 +353,12 @@ private:
     // Parsed FC telemetry
     FCTelemetry fc_telem_;
     mutable std::atomic<bool> telem_lock_{false};  // spinlock for copy
+
+    // FC parameter cache (fixed array — no heap alloc on Pi Zero)
+    static constexpr size_t MAX_PARAMS = 64;
+    FCParam params_[MAX_PARAMS];
+    size_t  param_count_{0};
+    mutable std::atomic<bool> param_lock_{false};  // spinlock for param cache
     
     // MAVLink frame parser
     static constexpr size_t RX_BUF_SIZE = 2048;

@@ -449,6 +449,20 @@ PYBIND11_MODULE(jtzero_native, m) {
         .def("send_statustext", [](jtzero::Runtime& self, int severity, const std::string& text) {
             return self.mavlink().send_statustext(static_cast<uint8_t>(severity), text.c_str());
         }, py::arg("severity"), py::arg("text"), "Send STATUSTEXT via MAVLink (0=EMERG..6=INFO)")
+
+        .def("request_param", [](jtzero::Runtime& self, const std::string& name) {
+            return self.mavlink().request_param(name.c_str());
+        }, py::arg("name"), "Send PARAM_REQUEST_READ to FC (reply arrives async via PARAM_VALUE)")
+
+        .def("get_param", [](jtzero::Runtime& self, const std::string& name) -> py::object {
+            float v = 0.0f;
+            if (self.mavlink().get_param(name.c_str(), v)) return py::float_(v);
+            return py::none();
+        }, py::arg("name"), "Read cached FC param value, or None if not yet received")
+
+        .def("param_cache_count", [](const jtzero::Runtime& self) {
+            return static_cast<int>(self.mavlink().param_cache_count());
+        }, "Number of FC params currently cached")
         
         .def("set_vo_profile", [](jtzero::Runtime& self, int profile_id) {
             if (profile_id >= 0 && profile_id < static_cast<int>(jtzero::NUM_VO_MODES)) {

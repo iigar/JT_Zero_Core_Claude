@@ -582,6 +582,44 @@ bool MAVLinkInterface::send_statustext(uint8_t severity, const char* text) {
     return true;
 }
 
+// ── FC parameter read (PARAM_REQUEST_READ #20 / PARAM_VALUE #22) ──
+
+bool MAVLinkInterface::request_param(const char* name) {
+    if (state_ != MAVLinkState::CONNECTED) return false;
+    if (simulated_ || (serial_fd_ < 0 && udp_fd_ < 0)) return false;
+
+    // PARAM_REQUEST_READ (msg_id=20, CRC_EXTRA=214)
+    // Wire order (size-desc): param_index(int16,2), param_id[16], target_system(1),
+    //                          target_component(1) = 20 bytes
+    uint8_t payload[20] = {0};
+    int16_t param_index = -1;  // -1 → look up by name (param_id)
+    std::memcpy(payload + 0, &param_index, 2);
+    for (int i = 0; i < 16 && name[i]; i++) {
+        payload[2 + i] = static_cast<uint8_t>(name[i]);
+    }
+    payload[18] = fc_system_id_;  // target_system
+    payload[19] = 1;              // target_component = MAV_COMP_ID_AUTOPILOT1
+    send_mavlink_v2(20, payload, 20, 214);
+    msgs_sent_.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+bool MAVLinkInterface::get_param(const char* name, float& out) const {
+    ScopedSpinLock plk(param_lock_);
+    for (size_t i = 0; i < param_count_; i++) {
+        if (std::strncmp(params_[i].name, name, 17) == 0) {
+            out = params_[i].value;
+            return true;
+        }
+    }
+    return false;
+}
+
+size_t MAVLinkInterface::param_cache_count() const {
+    ScopedSpinLock plk(param_lock_);
+    return param_count_;
+}
+
 // ═══════════════════════════════════════════════════════════
 // MAVLink v2 Frame Serializer
 // ═══════════════════════════════════════════════════════════
@@ -722,6 +760,8 @@ static uint8_t get_crc_extra(uint32_t msg_id) {
         case 0:   return 50;   // HEARTBEAT
         case 1:   return 124;  // SYS_STATUS
         case 2:   return 137;  // SYSTEM_TIME
+        case 20:  return 214;  // PARAM_REQUEST_READ
+        case 22:  return 220;  // PARAM_VALUE
         case 24:  return 24;   // GPS_RAW_INT
         case 26:  return 170;  // SCALED_IMU
         case 27:  return 144;  // RAW_IMU
@@ -1139,6 +1179,42 @@ void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t
         break;
     }
     
+    case 22: {  // PARAM_VALUE — cache FC parameter
+        // Wire order (size-desc): param_value(4), param_count(2), param_index(2),
+        //                          param_id[16], param_type(1) = 25 bytes
+        if (len < 25) break;
+        float   pv    = safe_f32(0);
+        uint8_t ptype = safe_u8(24);
+        // param_id: 16 chars, may NOT be null-terminated if exactly 16
+        char pname[17]{};
+        for (int i = 0; i < 16; i++) {
+            uint8_t c = safe_u8(8 + i);
+            if (c == 0) break;
+            pname[i] = static_cast<char>(c);
+        }
+        if (pname[0] == '\0') break;  // empty name — ignore
+
+        // Store into fixed cache (update existing or append). Uses param_lock_
+        // (separate from telem_lock_ which we already hold — no cross-order elsewhere).
+        {
+            ScopedSpinLock plk(param_lock_);
+            size_t idx = MAX_PARAMS;
+            for (size_t i = 0; i < param_count_; i++) {
+                if (std::strncmp(params_[i].name, pname, 17) == 0) { idx = i; break; }
+            }
+            if (idx == MAX_PARAMS && param_count_ < MAX_PARAMS) {
+                idx = param_count_++;
+            }
+            if (idx < MAX_PARAMS) {
+                std::strncpy(params_[idx].name, pname, 16);
+                params_[idx].name[16] = '\0';
+                params_[idx].value = pv;
+                params_[idx].type  = ptype;
+            }
+        }
+        break;
+    }
+
     default:
         break;
     }

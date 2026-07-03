@@ -385,6 +385,17 @@ async def set_vo_profile(profile_id: int):
 async def get_mavlink():
     return runtime.get_mavlink_stats()
 
+@app.get("/api/param/{name}")
+async def get_fc_param(name: str):
+    """Read a single flight-controller parameter by name via MAVLink.
+
+    Sends PARAM_REQUEST_READ and waits for the PARAM_VALUE reply.
+    Returns {"name", "value"} or {"name", "value": None, "error"}.
+    """
+    if not hasattr(runtime, 'read_fc_param'):
+        return {"name": name, "value": None, "error": "param read not supported"}
+    return await runtime.read_fc_param(name)
+
 @app.get("/api/vo/trail")
 async def get_vo_trail():
     """Get VO position trail for 3D visualization."""

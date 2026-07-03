@@ -366,7 +366,11 @@ class JTZeroSimulator:
     def get_mavlink_stats(self) -> dict:
         with self._lock:
             return asdict(self.mavlink_stats)
-    
+
+    async def read_fc_param(self, name: str, timeout: float = 2.0) -> dict:
+        """Simulator has no real FC — parameters cannot be read."""
+        return {"name": name, "value": None, "error": "no FC in simulator mode"}
+
     def _emit_event(self, etype: EventType, priority: int, message: str):
         ev = EventRecord(
             timestamp=time.time() - self._start_time,
