@@ -1103,6 +1103,7 @@ bool CameraPipeline::tick(float ground_distance) {
             inject_state_.store(0, std::memory_order_release);  // free for Python to write
             
             // Run VO on injected thermal frame
+            vo_.set_frame_brightness(frame_brightness_);  // Fix #63: brightness gate (last known)
             vo_result_ = vo_.process(current_frame_, ground_distance);
             frame_count_++;
             
@@ -1183,6 +1184,7 @@ bool CameraPipeline::tick(float ground_distance) {
         }
     }
 
+    vo_.set_frame_brightness(frame_brightness_);  // Fix #63: current-frame brightness for bias gate
     vo_result_ = vo_.process(current_frame_, ground_distance);
     frame_count_++;
 

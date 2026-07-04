@@ -589,16 +589,17 @@ bool MAVLinkInterface::request_param(const char* name) {
     if (simulated_ || (serial_fd_ < 0 && udp_fd_ < 0)) return false;
 
     // PARAM_REQUEST_READ (msg_id=20, CRC_EXTRA=214)
-    // Wire order (size-desc): param_index(int16,2), param_id[16], target_system(1),
-    //                          target_component(1) = 20 bytes
+    // Wire order (size-desc, then XML order within same size):
+    //   param_index(int16,2)@0, target_system(1)@2, target_component(1)@3,
+    //   param_id[16]@4  = 20 bytes
     uint8_t payload[20] = {0};
     int16_t param_index = -1;  // -1 → look up by name (param_id)
     std::memcpy(payload + 0, &param_index, 2);
+    payload[2] = fc_system_id_;  // target_system
+    payload[3] = 1;              // target_component = MAV_COMP_ID_AUTOPILOT1
     for (int i = 0; i < 16 && name[i]; i++) {
-        payload[2 + i] = static_cast<uint8_t>(name[i]);
+        payload[4 + i] = static_cast<uint8_t>(name[i]);
     }
-    payload[18] = fc_system_id_;  // target_system
-    payload[19] = 1;              // target_component = MAV_COMP_ID_AUTOPILOT1
     send_mavlink_v2(20, payload, 20, 214);
     msgs_sent_.fetch_add(1, std::memory_order_relaxed);
     return true;

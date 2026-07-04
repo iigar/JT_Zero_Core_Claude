@@ -456,7 +456,13 @@ public:
     
     // Set current yaw from IMU/EKF for hover correction reference
     void set_yaw_hint(float yaw_rad);
-    
+
+    // Fix #63: current frame brightness for the bias-calibration gate in process().
+    // Brightness is computed by CameraPipeline (NEON), so it is pushed in before
+    // process() — mirrors the set_imu_hint() pattern. frame_brightness_ lives in
+    // VisualOdometry, not CameraPipeline, so the Fix #61 gate can reference it.
+    void set_frame_brightness(float b) { frame_brightness_ = b; }
+
     // Set hardware profile
     void set_platform(const PlatformConfig& platform);
     
@@ -567,6 +573,7 @@ private:
     // Persists across reset() — physical calibration, clear only via clear_velocity_bias().
     float vx_bias_{0};
     float vy_bias_{0};
+    float frame_brightness_{0};   // Fix #63: pushed in via set_frame_brightness() before process()
     static constexpr float VEL_BIAS_ALPHA      = 0.005f;  // ~30s settle at 15fps (fast: confirmed hover)
     static constexpr float VEL_BIAS_ALPHA_SLOW = 0.001f; // ~67s settle at 15fps (slow: general flight)
     static constexpr float VEL_BIAS_GATE       = 0.5f;   // m/s gate — skip during fast maneuvers
