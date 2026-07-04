@@ -1,5 +1,15 @@
 # CLAUDE.md — JT-Zero Runtime Technical Reference
 
+## Session Context (читати першим)
+
+Відкрий ці файли на початку кожної сесії:
+1. `D:\Obsidian\CloudCode\_claude\memory\session_jtzero.md` — де зупинились, наступна дія
+2. `D:\Obsidian\CloudCode\_claude\about_me.md` — профіль користувача
+
+Наприкінці сесії оновити `session_jtzero.md`.
+
+---
+
 > ## MANDATORY RULES FOR ALL AGENTS
 > 0. **Read Worklog.md first.** At the start of every session read `Worklog.md` — it contains what was done, why, and what is pending. Do NOT start working without reading it.
 > 1. **User language: Ukrainian.** Always respond in Ukrainian.
@@ -371,6 +381,7 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
 | POST   | /api/vo/profile/{id}         | Switch VO mode at runtime            |
 | GET    | /api/vo/trail                | VO position trail [{x,y,z,t}] for 3D visualization |
 | GET    | /api/mavlink                 | MAVLink stats + RC channels + FC telemetry |
+| GET    | /api/param/{name}            | Read one FC parameter via MAVLink (PARAM_REQUEST_READ→PARAM_VALUE). Read-only, no PARAM_SET |
 | GET    | /api/performance             | CPU, memory, latency breakdown       |
 | GET    | /api/diagnostics             | Hardware diagnostics (camera, I2C)   |
 | POST   | /api/diagnostics/scan        | Run fresh hardware diagnostics       |
@@ -509,6 +520,8 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
 60. **VO velocity bias (камера нахилена ~5° pitch + floor texture) → LOITER Y drift 0.55 м/хв** — Hover decay (Fix #53a) множить `kf_vy_ × 0.85` але VO update step `kf_vy_ += K*(raw_vy - kf_vy_)` одразу повертає систематичний bias в Kalman state — decay безпорадний проти стабільного raw_vy ≠ 0. Fix #38 (gyro_z_bias) вирішив таку ж задачу для yaw. Fix #60 дзеркалить цю модель для лінійної швидкості: `vx_bias_`/`vy_bias_` — EMA від raw_vx/raw_vy під час стабільного hover (≥5с, `|raw_v| < 0.5 m/s`, α=0.005, ~30с settling). Bias віднімається з raw_v ПЕРЕД Kalman update: `kf_vx_ += Kx * (raw_vx - vx_bias_ - kf_vx_)`. Persistent через `reset()` (фізична калібровка); скидається лише через `clear_velocity_bias()`. RC ch12 disarmed → повний reset (pose + bias), armed → тільки pose. STATUSTEXT `"JT0: VO BIAS CALIB X=0.001 Y=0.009"` при стабілізації. `camera.h:VisualOdometry`, `camera_pipeline.cpp:Phase2+5`, `runtime.cpp:send_command("clear_bias")`, `native_bridge.py`.
 62. **Spike suppress зупиняв valid але не обнуляв dx/dy — pose накопичувався під час suppress** — `spike_suppress_frames_ > 0` встановлював `vo_result_.valid = false` але залишав `vo_result_.dx/dy` з raw VO значень. Python `_record_trail_position()` читає `vo_dx` без перевірки `vo_valid` → pose_x/y накопичував дельту навіть 3с після spike. Підтверджено логами: при bright=1 (кінець польоту) pose_y стрибнув +0.36м за один tick. Fix: додано `vo_result_.dx = 0; vo_result_.dy = 0` в spike suppress блок. Захищає і trail і MAVLink VISION_POSITION_ESTIMATE. `camera_pipeline.cpp:1190-1195`.
 61. **Fix #60 bias ніколи не спрацьовував у LOITER — hover gate несумісна з польотом** — Logs показали `vx_bias=0.000 vy_bias=0.000` весь час польоту. Причина: `hover_.is_hovering` вимагає `micro_motion_avg < 0.5px` за 30 consecutive frames — контролер LOITER постійно коригує, VO бачить 1-3px руху → hover НІКОЛИ не детектується в польоті. На темній підлозі (bright=1-2) hover детектується але `raw_vx≈0` (LK нічого не бачить) → bias калібрується до 0 і **знищує** попередню калібровку. Fix: двошаровий підхід — fast path (α=0.005): hover підтверджений + `frame_brightness_ >= 4`; slow path (α=0.001, ~67с): будь-який valid VO + `frame_brightness_ >= 4`. `BIAS_MIN_BRIGHTNESS=4` блокує калібровку в темряві (підлога bright=1-2 < 4, польот bright=5-20 ≥ 4). `camera.h:VEL_BIAS_ALPHA_SLOW,BIAS_MIN_BRIGHTNESS`, `camera_pipeline.cpp:846-868`.
+63. **Canonical не компілювався — `frame_brightness_` поза scope у Fix #61** — `VisualOdometry::process()` (gate калібровки bias, Fix #61) звертався до `frame_brightness_`, який є членом `CameraPipeline` (camera.h), а НЕ `VisualOdometry` → `error: frame_brightness_ was not declared in this scope`. Тобто Fix #61 закомічений але жодного разу не збирався (Emergent-гілка компілювалась бо взагалі не мала Fix #61). Fix: додано член `frame_brightness_` + сеттер `set_frame_brightness()` у `VisualOdometry` (дзеркалить `set_imu_hint`); `CameraPipeline` пушить яскравість перед кожним `vo_.process()` (~1106 fallback, ~1187 normal). `camera.h`, `camera_pipeline.cpp`.
+64. **param-read PARAM_REQUEST_READ малформований — FC мовчки ігнорував** — Wire-порядок MAVLink v2 (спадання розміру, потім XML-порядок): `param_index(int16)@0, target_system@2, target_component@3, param_id[16]@4`. Початково `param_id` стояв на offset 2, а target_system/component на 18/19 → FC бачив сміття в адресації і не відповідав на жоден запит (навіть SYSID_THISMAV). PARAM_VALUE handler був правильний (STAT_RUNTIME парсився). Fix: правильний layout у `request_param()`. Підтверджено: VISO_TYPE=1, EK3_SRC1_POSXY/VELXY=6, VISO_POS_M_NSE=0.2 прочитані з Matek H743. `mavlink_interface.cpp:request_param`.
 
 ---
 
@@ -775,3 +788,48 @@ EK3_SRC1_POSZ = 1       (Baro — if no rangefinder)
 
 **To load personal context at session start:**
 Read `D:\Obsidian\CloudCode\_claude\CLAUDE.md` before starting work.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **JT_Zero_Core** (3491 symbols, 6049 relationships, 116 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/JT_Zero_Core/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/JT_Zero_Core/clusters` | All functional areas |
+| `gitnexus://repo/JT_Zero_Core/processes` | All execution flows |
+| `gitnexus://repo/JT_Zero_Core/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->
