@@ -328,6 +328,20 @@ Type=notify
 User=$CURRENT_USER
 WorkingDirectory=$BACKEND_DIR
 Environment=PYTHONPATH=$JT_DIR
+# ── Camera tuning (CSI VO) — JT-Zero reads these env vars at runtime ──
+# Adjust for your hardware, then: sudo systemctl daemon-reload && sudo systemctl restart jtzero
+#   JTZERO_SHUTTER  fixed exposure (us): 8000=outdoor daylight, 20000=indoor(default), 33333=very dark
+#   JTZERO_GAIN     fixed sensor gain:   1.0=outdoor, 2.0=indoor(default), 4.0=very dark
+#   JTZERO_HFLIP    1 = mirror horizontally
+#   JTZERO_VFLIP    1 = flip vertically
+#   NOTE: upside-down camera mount → set BOTH HFLIP=1 and VFLIP=1 (180°). An un-flipped
+#   upside-down image inverts VO displacement (dx/dy) → wrong pose → EKF3 "stopped aiding".
+# Defaults apply if left commented. Per-machine override (survives setup.sh re-run):
+#   /etc/systemd/system/jtzero.service.d/override.conf
+#Environment=JTZERO_SHUTTER=20000
+#Environment=JTZERO_GAIN=2.0
+#Environment=JTZERO_HFLIP=0
+#Environment=JTZERO_VFLIP=0
 ExecStart=$BACKEND_DIR/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8001
 Restart=always
 RestartSec=5
