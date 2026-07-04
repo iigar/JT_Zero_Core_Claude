@@ -580,6 +580,15 @@ private:
     static constexpr float MIN_HOVER_FOR_BIAS  = 5.0f;   // sec stable hover before fast-path fires
     static constexpr int   BIAS_MIN_BRIGHTNESS = 4;       // camera must see something (>dark floor bright=1-2)
 
+    // Fix #65: position_uncertainty clamp (meters, 1-sigma) sent to EKF3 as VISION cov.
+    // FLOOR = FC VISO_POS_M_NSE — never claim better than the FC baseline.
+    // CAP   = keep EKF3 still fusing VO in GPS-denied flight (VO is the only source →
+    //         never let uncertainty grow so large EKF3 effectively ignores it).
+    static constexpr float POS_UNC_FLOOR = 0.2f;   // m (matches VISO_POS_M_NSE=0.2)
+    static constexpr float POS_UNC_CAP   = 5.0f;   // m (real drift ≈5m/10min)
+    // reset() sets each axis var so sqrt(var_x+var_y) == FLOOR (fresh start = full confidence).
+    static constexpr float POS_VAR_INIT  = POS_UNC_FLOOR * POS_UNC_FLOOR / 2.0f; // 0.02 m²
+
     // Median + MAD computation helpers
     static float compute_median(float* arr, int n);
     static float compute_mad(float* arr, int n, float median);

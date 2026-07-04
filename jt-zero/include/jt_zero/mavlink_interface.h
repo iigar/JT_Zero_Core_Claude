@@ -112,6 +112,7 @@ struct MAVOdometry {
     uint8_t frame_id{0};                // MAV_FRAME
     uint8_t child_frame_id{0};
     float quality{0};                    // 0-1
+    float position_uncertainty{0};       // Fix #65: 1-sigma m, drift-based (clamped [0.2,5])
 };
 
 struct MAVOpticalFlowRad {

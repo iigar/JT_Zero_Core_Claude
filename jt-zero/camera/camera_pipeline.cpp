@@ -832,6 +832,11 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // Fix 5: position uncertainty from KF covariance, not ad-hoc distance * drift_rate.
     // sqrt(pose_var_x + pose_var_y) gives 1-sigma radial position uncertainty in meters.
     result.position_uncertainty = std::sqrt(pose_var_x_ + pose_var_y_);
+    // Fix #65: clamp to [FLOOR, CAP] before it is sent to EKF3 as VISION covariance.
+    // FLOOR: never claim better than FC baseline (VISO_POS_M_NSE). CAP: keep EKF3 fusing
+    // VO in GPS-denied flight (VO is the only position source — don't let it be ignored).
+    if (result.position_uncertainty < POS_UNC_FLOOR) result.position_uncertainty = POS_UNC_FLOOR;
+    if (result.position_uncertainty > POS_UNC_CAP)   result.position_uncertainty = POS_UNC_CAP;
 
     // ════════════════════════════════════════════════════
     // Phase 5: Hover yaw correction
@@ -946,8 +951,8 @@ void VisualOdometry::reset() {
     kf_vy_prev_ = 0;
     kf_vx_var_ = 1.0f;
     kf_vy_var_ = 1.0f;
-    pose_var_x_ = 1.0f;
-    pose_var_y_ = 1.0f;
+    pose_var_x_ = POS_VAR_INIT;  // Fix #65: reset uncertainty to FLOOR, not 1.0 (fresh start = full confidence)
+    pose_var_y_ = POS_VAR_INIT;
     running_confidence_ = 0.5f;
     vo_valid_stable_ = false;
     valid_frames_count_ = 0;

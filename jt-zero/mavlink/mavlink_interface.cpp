@@ -414,8 +414,12 @@ bool MAVLinkInterface::send_vision_position(const MAVVisionPositionEstimate& msg
     
     if (!simulated_ && (serial_fd_ >= 0 || udp_fd_ >= 0)) {
         // VISION_POSITION_ESTIMATE (msg_id=102, CRC_EXTRA=158)
-        // Wire order: usec(8), x(4), y(4), z(4), roll(4), pitch(4), yaw(4) = 32 bytes
-        uint8_t payload[32];
+        // Wire order: usec(8), x(4), y(4), z(4), roll(4), pitch(4), yaw(4),
+        //             covariance[21](84) = 116 bytes (Fix #65: covariance extension).
+        // MAVLink v2 trims trailing zeros, so when covariance is all-zero the FC still
+        // receives the base 32-byte form and falls back to VISO_POS_M_NSE.
+        uint8_t payload[116];
+        std::memset(payload, 0, sizeof(payload));
         std::memcpy(payload + 0,  &msg.usec,  8);
         std::memcpy(payload + 8,  &msg.x,     4);
         std::memcpy(payload + 12, &msg.y,     4);
@@ -423,7 +427,8 @@ bool MAVLinkInterface::send_vision_position(const MAVVisionPositionEstimate& msg
         std::memcpy(payload + 20, &msg.roll,  4);
         std::memcpy(payload + 24, &msg.pitch, 4);
         std::memcpy(payload + 28, &msg.yaw,   4);
-        send_mavlink_v2(102, payload, 32, 158);
+        std::memcpy(payload + 32, msg.covariance, 21 * 4);  // covariance[21], variance units
+        send_mavlink_v2(102, payload, 116, 158);
     }
     
     msgs_sent_.fetch_add(1, std::memory_order_relaxed);
@@ -454,15 +459,20 @@ bool MAVLinkInterface::send_odometry(const MAVOdometry& msg) {
         std::memcpy(payload + 52, &msg.pitchspeed, 4);
         std::memcpy(payload + 56, &msg.yawspeed, 4);
         
-        // pose_covariance[21] at offset 60 (upper triangle of 6x6 matrix)
-        // Use VO confidence to set covariance: high confidence → low covariance
-        float pos_var = 0.01f; // 10cm base uncertainty
+        // pose_covariance[21] at offset 60 (upper triangle of 6x6 matrix).
+        // Fix #65: report the LARGER of accumulated-drift variance and per-frame-confidence
+        // variance. Drift (position_uncertainty, clamped [0.2,5]m in VO) makes EKF3 aware of
+        // how far VO has wandered; confidence keeps the old anti-cycling behaviour (a bad
+        // frame → high variance so EKF3 does not chase it). max() satisfies both.
+        float drift_var = msg.position_uncertainty * msg.position_uncertainty; // [0.04, 25] m²
+        float conf_var = 0.01f; // 10cm base uncertainty
         if (msg.quality < 80) {
-            pos_var = 0.1f + (80.0f - msg.quality) * 0.05f; // up to 4.1m uncertainty
+            conf_var = 0.1f + (80.0f - msg.quality) * 0.05f; // up to 4.1m uncertainty
         }
         if (msg.quality < 40) {
-            pos_var = 10.0f; // low confidence → 10m uncertainty (EKF ignores, prevents cycling)
+            conf_var = 10.0f; // low confidence → 10m uncertainty (EKF ignores, prevents cycling)
         }
+        float pos_var = std::max(drift_var, conf_var);
         float rot_var = 0.01f; // rotation variance (fixed, yaw from gyro)
         // Diagonal elements: xx, yy, zz, roll, pitch, yaw
         // Index mapping for upper triangle: [0]=xx, [6]=yy, [11]=zz, [15]=rr, [18]=pp, [20]=yy_rot
@@ -1237,6 +1247,19 @@ MAVVisionPositionEstimate MAVLinkInterface::build_vision_position(
     msg.pitch = state.pitch * 0.0174533f;
     msg.yaw   = state.yaw * 0.0174533f;
     // Note: vo_pose_x_/y_ accumulation is done in tick() — not here.
+
+    // Fix #65: dynamic covariance so EKF3 knows the accumulated VO drift instead of the
+    // static VISO_POS_M_NSE. covariance[21] = upper triangle of the 6x6 pose covariance
+    // (x,y,z,roll,pitch,yaw). MAVLink units are VARIANCE (m² / rad²). We fill the xx/yy
+    // position variance from vo.position_uncertainty (already clamped to [0.2,5] m in VO).
+    // All 21 entries default to 0 (struct value-init); ArduPilot reads covariance[0]. If VO
+    // is invalid, leave covariance[0]=0 so the FC falls back to VISO_POS_M_NSE.
+    if (vo.valid && vo.position_uncertainty > 0.0f) {
+        const float pos_var = vo.position_uncertainty * vo.position_uncertainty;
+        msg.covariance[0]  = pos_var;   // xx
+        msg.covariance[6]  = pos_var;   // yy
+        msg.covariance[11] = pos_var;   // zz (no independent Z estimate — reuse horizontal)
+    }
     return msg;
 }
 
@@ -1257,6 +1280,7 @@ MAVOdometry MAVLinkInterface::build_odometry(
     // Set quality 0-100 based on VO confidence (not just tracking_quality)
     // quality=0 signals EKF3 to ignore this measurement entirely (ArduPilot convention)
     msg.quality = vo.valid ? static_cast<uint8_t>(vo.confidence * 100.0f) : 0;
+    msg.position_uncertainty = vo.position_uncertainty;  // Fix #65: drift-based covariance
     msg.frame_id = 0;       // MAV_FRAME_LOCAL_NED
     msg.child_frame_id = 1; // MAV_FRAME_BODY_FRD
     
