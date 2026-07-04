@@ -1392,6 +1392,13 @@ void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
                 vo_pose_y_ += vo.dy;
             }
 
+            // Fix #66: also send VISION_POSITION_ESTIMATE (#102). ArduPilot fuses ODOMETRY
+            // velocity but was NOT establishing EKF3 horizontal position (const_pos_mode,
+            // pos_horiz OFF) — #102 is the canonical external-nav position message. Carries
+            // the same accumulated pose + Fix #65 drift covariance.
+            auto vpos_msg = build_vision_position(state, vo);
+            send_vision_position(vpos_msg);
+
             auto odom_msg = build_odometry(state, vo);
             send_odometry(odom_msg);
 

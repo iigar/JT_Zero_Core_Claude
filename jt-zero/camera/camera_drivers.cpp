@@ -140,13 +140,22 @@ bool PiCSICamera::open() {
     int   shutter_us = shutter_env ? std::atoi(shutter_env) : 20000;
     float gain_val   = gain_env ? static_cast<float>(std::atof(gain_env)) : 2.0f;
 
-    char cmd_buf[256];
+    // Camera orientation (Fix #67). An upside-down / mirrored mount inverts VO
+    // displacement direction (dx/dy sign flip) → the pose goes the wrong way →
+    // EKF3 rejects external nav ("stopped aiding" cycling). Flip at the source so
+    // VO sees an upright image. JTZERO_HFLIP / JTZERO_VFLIP (0/1). 180° = both = 1.
+    const char* hflip_env = std::getenv("JTZERO_HFLIP");
+    const char* vflip_env = std::getenv("JTZERO_VFLIP");
+    const char* hflip = (hflip_env && std::atoi(hflip_env) != 0) ? "--hflip " : "";
+    const char* vflip = (vflip_env && std::atoi(vflip_env) != 0) ? "--vflip " : "";
+
+    char cmd_buf[320];
     std::snprintf(cmd_buf, sizeof(cmd_buf),
         "rpicam-vid --width 640 --height 480 "
         "--codec yuv420 --framerate 15 "
-        "--shutter %d --gain %.1f "
+        "--shutter %d --gain %.1f %s%s"
         "-t 0 --nopreview -o - 2>/dev/null",
-        shutter_us, gain_val);
+        shutter_us, gain_val, hflip, vflip);
     const char* cmd = cmd_buf;
     
     pipe_ = popen(cmd, "r");
