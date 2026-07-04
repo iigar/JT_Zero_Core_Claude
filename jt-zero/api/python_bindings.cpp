@@ -287,7 +287,29 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
         result["rc_chancount"] = static_cast<int>(fc.rc_chancount);
         result["rc_rssi"] = static_cast<int>(fc.rc_rssi);
     }
-    
+
+    // Add EKF_STATUS_REPORT if received (EKF3 ExternalNav fusion health)
+    if (fc.ekf_valid) {
+        uint16_t f = fc.ekf_flags;
+        result["ekf"] = py::dict(
+            "flags"_a = static_cast<int>(f),
+            "velocity_variance"_a = fc.ekf_velocity_variance,
+            "pos_horiz_variance"_a = fc.ekf_pos_horiz_variance,
+            "pos_vert_variance"_a = fc.ekf_pos_vert_variance,
+            "compass_variance"_a = fc.ekf_compass_variance,
+            "terrain_alt_variance"_a = fc.ekf_terrain_alt_variance,
+            // Decoded EKF_STATUS_FLAGS bits (ArduPilot)
+            "attitude"_a        = (bool)(f & 1),
+            "velocity_horiz"_a  = (bool)(f & 2),
+            "velocity_vert"_a   = (bool)(f & 4),
+            "pos_horiz_rel"_a   = (bool)(f & 8),
+            "pos_horiz_abs"_a   = (bool)(f & 16),
+            "pos_vert_abs"_a    = (bool)(f & 32),
+            "pos_vert_agl"_a    = (bool)(f & 64),
+            "const_pos_mode"_a  = (bool)(f & 128)
+        );
+    }
+
     return result;
 }
 

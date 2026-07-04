@@ -219,6 +219,15 @@ struct FCTelemetry {
     uint8_t  rc_chancount{0};
     uint8_t  rc_rssi{0};
     bool     rc_valid{false};
+
+    // EKF_STATUS_REPORT (msg 193) — EKF3 health, incl. ExternalNav fusion state
+    uint16_t ekf_flags{0};              // EKF_STATUS_FLAGS bitmask
+    float    ekf_velocity_variance{0};
+    float    ekf_pos_horiz_variance{0}; // key: horizontal position innovation ratio
+    float    ekf_pos_vert_variance{0};
+    float    ekf_compass_variance{0};
+    float    ekf_terrain_alt_variance{0};
+    bool     ekf_valid{false};
 };
 
 // ─── FC Parameter (read-only cache) ──────────────────────

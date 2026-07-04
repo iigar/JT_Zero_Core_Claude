@@ -714,6 +714,7 @@ void MAVLinkInterface::request_data_streams() {
         { 33,  500000 },  // GLOBAL_POSITION_INT @ 2 Hz
         { 74,  500000 },  // VFR_HUD @ 2 Hz
         { 1,   500000 },  // SYS_STATUS @ 2 Hz
+        { 193, 500000 },  // EKF_STATUS_REPORT @ 2 Hz (ExternalNav fusion health, Fix #65 verify)
     };
     
     for (auto& m : intervals) {
@@ -785,6 +786,7 @@ static uint8_t get_crc_extra(uint32_t msg_id) {
         case 77:  return 143;  // COMMAND_ACK
         case 102: return 158;  // VISION_POSITION_ESTIMATE
         case 106: return 175;  // OPTICAL_FLOW_RAD
+        case 193: return 71;   // EKF_STATUS_REPORT
         case 253: return 83;   // STATUSTEXT
         case 331: return 91;   // ODOMETRY
         default:  return 0;    // Unknown — skip CRC validation
@@ -1190,6 +1192,24 @@ void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t
         break;
     }
     
+    case 193: {  // EKF_STATUS_REPORT — EKF3 health / ExternalNav fusion state
+        // Wire order (size-desc): velocity_variance(4)@0, pos_horiz_variance(4)@4,
+        //   pos_vert_variance(4)@8, compass_variance(4)@12, terrain_alt_variance(4)@16,
+        //   flags(uint16)@20 = 22 bytes base (airspeed_variance ext @22 ignored).
+        // MAVLink v2 trims trailing zeros: if flags < 256 the high byte (@21) is dropped
+        // → len==21; if flags==0, len==20. Read flags byte-wise so trimming is handled.
+        if (len < 20) break;
+        fc_telem_.ekf_velocity_variance   = safe_f32(0);
+        fc_telem_.ekf_pos_horiz_variance  = safe_f32(4);
+        fc_telem_.ekf_pos_vert_variance   = safe_f32(8);
+        fc_telem_.ekf_compass_variance    = safe_f32(12);
+        fc_telem_.ekf_terrain_alt_variance = safe_f32(16);
+        fc_telem_.ekf_flags = static_cast<uint16_t>(safe_u8(20))
+                            | (static_cast<uint16_t>(safe_u8(21)) << 8);
+        fc_telem_.ekf_valid = true;
+        break;
+    }
+
     case 22: {  // PARAM_VALUE — cache FC parameter
         // Wire order (size-desc): param_value(4), param_count(2), param_index(2),
         //                          param_id[16], param_type(1) = 25 bytes
