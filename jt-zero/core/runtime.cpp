@@ -935,13 +935,28 @@ void Runtime::camera_loop() {
         if (camera_.is_running()) {
             // Zone B: read IMU/attitude/altitude under sensor_mutex_
             float cam_altitude, cam_yaw, cam_acc_x, cam_acc_y, cam_gyro_z;
+            float cam_roll, cam_pitch;
             {
                 std::lock_guard<std::mutex> lk(sensor_mutex_);
                 cam_altitude = state_.altitude_agl;
                 cam_yaw      = state_.yaw;
+                cam_roll     = state_.roll;
+                cam_pitch    = state_.pitch;
                 cam_acc_x    = state_.imu.acc_x;
                 cam_acc_y    = state_.imu.acc_y;
                 cam_gyro_z   = state_.imu.gyro_z;
+            }
+
+            // Fix #68: gravity compensation — remove tilt-induced gravity leakage
+            // from the accelerometer before it reaches the VO Kalman predict step.
+            // A static tilt of only 2.4° leaks 0.41 m/s² into acc_x/y (4× above
+            // IMU_ACCEL_DEADZONE), pushing kf velocity in a fixed direction even
+            // when the drone is not moving. Signs verified empirically on hardware:
+            // acc_x_leak = -9.81·sin(pitch), acc_y_leak = +9.81·sin(roll).
+            {
+                constexpr float DEG2RAD = 0.0174533f;
+                cam_acc_x += 9.81f * std::sin(cam_pitch * DEG2RAD);
+                cam_acc_y -= 9.81f * std::sin(cam_roll  * DEG2RAD);
             }
 
             // ground_dist for pixel→meter VO scale.
