@@ -530,6 +530,11 @@ private:
     float imu_ax_{0}, imu_ay_{0}, imu_gz_{0};
     bool  imu_hint_valid_{false};
 
+    // Fix #68: slow EMA of accelerometer (gravity leakage + IMU bias DC component);
+    // predict uses only the high-passed residual imu_a - acc_lp.
+    float acc_lp_x_{0}, acc_lp_y_{0};
+    bool  acc_lp_init_{false};
+
     // Fix 6: pre-integrated gyro rotation between T6 frames (rad, body frame)
     // Written at 200 Hz by T1 via accumulate_gyro(); read+reset by T6 in process()
     struct PreIntState {

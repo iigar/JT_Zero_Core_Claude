@@ -709,10 +709,27 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // a systematic position drift (~0.01m/5s) even with hover decay active.
     // Flight maneuvers: |acc| >> 0.1 m/s². Hover/static bias: <0.05 m/s².
     // Threshold 0.05 m/s² catches bias while passing real acceleration.
+    // Fix #68: high-pass the accelerometer before predict. A static frame tilt
+    // leaks gravity into acc_x/y (2.4° → 0.41 m/s², far above the dead-zone),
+    // poisoning kf velocity in a fixed direction (bench-verified: the leak vector
+    // matched -9.81·sin(tilt) to 3 decimals and equalled the VO drift direction).
+    // A slow EMA (~3.3s at 15fps) tracks the DC component (gravity leakage + IMU
+    // bias, whatever the mount orientation); predict uses only the AC residual,
+    // so second-scale real maneuvers still pass through.
     constexpr float IMU_ACCEL_DEADZONE = 0.10f;
+    constexpr float ACC_LP_ALPHA = 0.02f;
     if (imu_hint_valid_) {
-        if (std::fabsf(imu_ax_) > IMU_ACCEL_DEADZONE) kf_vx_ += imu_ax_ * dt;
-        if (std::fabsf(imu_ay_) > IMU_ACCEL_DEADZONE) kf_vy_ += imu_ay_ * dt;
+        if (!acc_lp_init_) {
+            acc_lp_x_ = imu_ax_;
+            acc_lp_y_ = imu_ay_;
+            acc_lp_init_ = true;
+        }
+        acc_lp_x_ += ACC_LP_ALPHA * (imu_ax_ - acc_lp_x_);
+        acc_lp_y_ += ACC_LP_ALPHA * (imu_ay_ - acc_lp_y_);
+        const float ax_hp = imu_ax_ - acc_lp_x_;
+        const float ay_hp = imu_ay_ - acc_lp_y_;
+        if (std::fabsf(ax_hp) > IMU_ACCEL_DEADZONE) kf_vx_ += ax_hp * dt;
+        if (std::fabsf(ay_hp) > IMU_ACCEL_DEADZONE) kf_vy_ += ay_hp * dt;
     }
 
     // Fix 53a: Kalman velocity decay in confirmed hover.
