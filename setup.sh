@@ -334,6 +334,11 @@ Environment=PYTHONPATH=$JT_DIR
 #   JTZERO_GAIN     fixed sensor gain:   1.0=outdoor, 2.0=indoor(default), 4.0=very dark
 #   JTZERO_HFLIP    1 = mirror horizontally
 #   JTZERO_VFLIP    1 = flip vertically
+#   JTZERO_AXIS_MAP "m00,m01,m10,m11" — image-flow(u,v) → body-flow(x fwd, y right) 2x2 matrix
+#                   (values -1/0/1, default "1,0,0,1"). Use when the camera sits rotated 90°
+#                   or mirrored in the hull: e.g. forward=image-down & right=image-right
+#                   (rotation+reflection) → "0,-1,-1,0". Calibrate signs by pushing the frame
+#                   forward/right and checking the sign of the accumulated VO x/y.
 #   NOTE: upside-down camera mount → set BOTH HFLIP=1 and VFLIP=1 (180°). An un-flipped
 #   upside-down image inverts VO displacement (dx/dy) → wrong pose → EKF3 "stopped aiding".
 # Defaults apply if left commented. Per-machine override (survives setup.sh re-run):
@@ -342,6 +347,7 @@ Environment=PYTHONPATH=$JT_DIR
 #Environment=JTZERO_GAIN=2.0
 #Environment=JTZERO_HFLIP=0
 #Environment=JTZERO_VFLIP=0
+#Environment=JTZERO_AXIS_MAP=1,0,0,1
 ExecStart=$BACKEND_DIR/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8001
 Restart=always
 RestartSec=5

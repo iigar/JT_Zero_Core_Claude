@@ -535,6 +535,13 @@ private:
     float acc_lp_x_{0}, acc_lp_y_{0};
     bool  acc_lp_init_{false};
 
+    // Fix #69: mount axis map — image pixel flow (u,v) → body-frame flow (x fwd, y right).
+    // The camera can sit rotated/mirrored in the airframe (mount is dictated by the hull);
+    // env JTZERO_AXIS_MAP="m00,m01,m10,m11" (values -1/0/1, default identity) fixes the
+    // mapping without a rebuild. Applied to filtered pixel flow before metric conversion;
+    // transpose applied to the IMU LK hint (matrix is orthonormal).
+    float axis_m00_{1}, axis_m01_{0}, axis_m10_{0}, axis_m11_{1};
+
     // Fix 6: pre-integrated gyro rotation between T6 frames (rad, body frame)
     // Written at 200 Hz by T1 via accumulate_gyro(); read+reset by T6 in process()
     struct PreIntState {

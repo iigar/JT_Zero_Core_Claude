@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
 #include <algorithm>
 
 namespace jtzero {
@@ -334,6 +335,20 @@ VisualOdometry::VisualOdometry() {
     // Default platform: Pi Zero 2W, default mode: Balanced
     platform_ = PLATFORMS[0];
     vo_mode_ = VO_MODES[1]; // Balanced
+
+    // Fix #69: mount axis map from env (JTZERO_AXIS_MAP="m00,m01,m10,m11").
+    // Identity keeps the legacy mapping (image u = body x, image v = body y).
+    const char* axis_env = std::getenv("JTZERO_AXIS_MAP");
+    if (axis_env) {
+        float m[4];
+        if (std::sscanf(axis_env, "%f,%f,%f,%f", &m[0], &m[1], &m[2], &m[3]) == 4) {
+            axis_m00_ = m[0]; axis_m01_ = m[1];
+            axis_m10_ = m[2]; axis_m11_ = m[3];
+            fprintf(stderr, "[VO] AXIS_MAP = [%g %g; %g %g]\n", m[0], m[1], m[2], m[3]);
+        } else {
+            fprintf(stderr, "[VO] JTZERO_AXIS_MAP parse error ('%s'), using identity\n", axis_env);
+        }
+    }
 }
 
 void VisualOdometry::set_imu_hint(float ax, float ay, float gyro_z) {
@@ -592,8 +607,12 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     {
         std::lock_guard<std::mutex> lk(preint_mtx_);
         if (preint_.valid && platform_.focal_length_px > 0) {
-            float shift_x =  platform_.focal_length_px * preint_.dgz;  // yaw → lateral
-            float shift_y = -platform_.focal_length_px * preint_.dgy;  // pitch → vertical
+            float shift_bx =  platform_.focal_length_px * preint_.dgz;  // yaw → lateral (body)
+            float shift_by = -platform_.focal_length_px * preint_.dgy;  // pitch → vertical (body)
+            // Fix #69: map body-frame shift into image frame (transpose of the
+            // orthonormal axis map = its inverse)
+            float shift_x = axis_m00_ * shift_bx + axis_m10_ * shift_by;
+            float shift_y = axis_m01_ * shift_bx + axis_m11_ * shift_by;
             // Only apply if the predicted shift is non-trivial (>0.3 px) to avoid
             // polluting LK with floating-point noise when the drone is stationary
             if (std::fabs(shift_x) + std::fabs(shift_y) > 0.3f) {
@@ -643,7 +662,7 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         std::memcpy(dy_copy, dy_arr, valid_flow * sizeof(float));
         median_dx = compute_median(dx_copy, valid_flow);
         median_dy = compute_median(dy_copy, valid_flow);
-        
+
         std::memcpy(dx_copy, dx_arr, valid_flow * sizeof(float));
         std::memcpy(dy_copy, dy_arr, valid_flow * sizeof(float));
         float mad_x = compute_mad(dx_copy, valid_flow, median_dx);
@@ -664,6 +683,13 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     
     float filtered_dx_px = (inlier_count > 3) ? inlier_sum_x / static_cast<float>(inlier_count) : median_dx;
     float filtered_dy_px = (inlier_count > 3) ? inlier_sum_y / static_cast<float>(inlier_count) : median_dy;
+
+    // Fix #69: rotate/mirror pixel flow from image frame into body frame per mount axis map
+    {
+        const float u = filtered_dx_px, v = filtered_dy_px;
+        filtered_dx_px = axis_m00_ * u + axis_m01_ * v;
+        filtered_dy_px = axis_m10_ * u + axis_m11_ * v;
+    }
     
     // ════════════════════════════════════════════════════
     // Compute dt and convert to meters
