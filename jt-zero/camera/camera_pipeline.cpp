@@ -297,8 +297,16 @@ int LKTracker::track(const uint8_t* prev_frame, const uint8_t* curr_frame,
             
             flow_x += dvx;
             flow_y += dvy;
-            
-            if (std::abs(dvx) < 0.05f && std::abs(dvy) < 0.05f) {
+
+            // Fix #75: require at least 2 iterations before honoring the step-size
+            // convergence check. On a weak-gradient (low-contrast) corner the FIRST
+            // Newton step is small and noisy regardless of true displacement — the
+            // old single-iteration exit reported "converged" at ~hint (often ~0) even
+            // with several real px of motion, while strong-gradient corners correctly
+            // walk toward the true minimum over 2+ iterations. Verified via [RAWFLOW]
+            // bench diagnostic: median-of-features silently dominated by these falsely
+            // "converged-at-zero" weak corners during slow real motion.
+            if (iter >= 1 && std::abs(dvx) < 0.05f && std::abs(dvy) < 0.05f) {
                 converged = true;
                 break;
             }
@@ -670,6 +678,27 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
             dx_arr[valid_flow] = features_[i].x - prev_features_[i].x;
             dy_arr[valid_flow] = features_[i].y - prev_features_[i].y;
             valid_flow++;
+        }
+    }
+
+    // Fix #74: raw per-feature flow distribution (env JTZERO_VO_DEBUG=1), throttled.
+    // Disambiguates: individual features show real motion (median/MAD aggregation bug)
+    // vs individual features ALSO near-zero (LK tracker convergence failure).
+    if (vo_debug_) {
+        static int dbg74_n = 0;
+        if (++dbg74_n % 3 == 0 && valid_flow > 0) {
+            float mag_min = 1e9f, mag_max = -1e9f, mag_sum = 0;
+            int near_zero = 0;
+            for (int i = 0; i < valid_flow; ++i) {
+                float mag = std::sqrt(dx_arr[i]*dx_arr[i] + dy_arr[i]*dy_arr[i]);
+                mag_min = std::min(mag_min, mag);
+                mag_max = std::max(mag_max, mag);
+                mag_sum += mag;
+                if (mag < 0.15f) near_zero++;
+            }
+            fprintf(stderr,
+                "[RAWFLOW] n=%d min=%.3f max=%.3f mean=%.3f near0=%d/%d\n",
+                valid_flow, mag_min, mag_max, mag_sum / valid_flow, near_zero, valid_flow);
         }
     }
     
@@ -1230,6 +1259,33 @@ bool CameraPipeline::tick(float ground_distance) {
     
     if (!active_camera_->capture(current_frame_)) {
         return false;
+    }
+
+    // Fix #73: verify T6 actually receives a fresh, sequential frame every tick.
+    // Diagnoses whether "VO blind to real motion" (Fix #72 finding) is caused by
+    // stale/duplicate frames reaching tick() rather than an LK/median bug.
+    {
+        static bool dbg_init = false, dbg_on = false;
+        static int64_t last_id = -1;
+        static uint64_t last_ts = 0;
+        if (!dbg_init) {
+            const char* e = std::getenv("JTZERO_VO_DEBUG");
+            dbg_on = (e && e[0] == '1');
+            dbg_init = true;
+        }
+        if (dbg_on) {
+            int64_t id = static_cast<int64_t>(current_frame_.info.frame_id);
+            uint64_t ts = current_frame_.info.timestamp_us;
+            int64_t id_gap = (last_id >= 0) ? (id - last_id) : 1;
+            int64_t ts_gap_us = (last_ts > 0) ? static_cast<int64_t>(ts - last_ts) : 66000;
+            static int hb = 0;
+            if (id_gap != 1 || ts_gap_us < 20000 || ts_gap_us > 200000 || (++hb % 100 == 0)) {
+                fprintf(stderr, "[FRAMEDBG] id=%lld id_gap=%lld ts_gap_us=%lld\n",
+                        (long long)id, (long long)id_gap, (long long)ts_gap_us);
+            }
+            last_id = id;
+            last_ts = ts;
+        }
     }
 
     // Compute brightness BEFORE VO so spike filter can gate the result
