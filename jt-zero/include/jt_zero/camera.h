@@ -535,6 +535,16 @@ private:
     float acc_lp_x_{0}, acc_lp_y_{0};
     bool  acc_lp_init_{false};
 
+    // Fix #72: optional VO flow diagnostics (env JTZERO_VO_DEBUG=1) — throttled stderr
+    // log of raw pixel medians, hover state and metric conversion. For bench/field
+    // calibration; off by default, zero cost when disabled.
+    bool vo_debug_{false};
+
+    // Fix #71: focal length override (env JTZERO_FOCAL, px). Platform autodetect reports
+    // "Pi 4" (830px @1280x720) on Zero 2W, while the 320x240 VO stream is a hard center
+    // crop of the IMX219 (~14.5° FOV → ~1258px). 0 = use platform table.
+    float focal_override_{0};
+
     // Fix #69: mount axis map — image pixel flow (u,v) → body-frame flow (x fwd, y right).
     // The camera can sit rotated/mirrored in the airframe (mount is dictated by the hull);
     // env JTZERO_AXIS_MAP="m00,m01,m10,m11" (values -1/0/1, default identity) fixes the

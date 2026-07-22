@@ -349,6 +349,23 @@ VisualOdometry::VisualOdometry() {
             fprintf(stderr, "[VO] JTZERO_AXIS_MAP parse error ('%s'), using identity\n", axis_env);
         }
     }
+
+    // Fix #72: VO flow diagnostics toggle.
+    const char* dbg_env = std::getenv("JTZERO_VO_DEBUG");
+    vo_debug_ = (dbg_env && dbg_env[0] == '1');
+    if (vo_debug_) fprintf(stderr, "[VO] VO_DEBUG enabled\n");
+
+    // Fix #71: focal override from env (crop FOV ≠ platform table).
+    const char* focal_env = std::getenv("JTZERO_FOCAL");
+    if (focal_env) {
+        float f = std::strtof(focal_env, nullptr);
+        if (f > 50.0f && f < 10000.0f) {
+            focal_override_ = f;
+            fprintf(stderr, "[VO] FOCAL override = %.0f px\n", f);
+        } else {
+            fprintf(stderr, "[VO] JTZERO_FOCAL out of range ('%s'), using platform table\n", focal_env);
+        }
+    }
 }
 
 void VisualOdometry::set_imu_hint(float ax, float ay, float gyro_z) {
@@ -604,11 +621,14 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     const float* lk_hint_dx = nullptr;
     const float* lk_hint_dy = nullptr;
 
+    // Fix #71: effective focal — env override wins over (possibly wrong) platform table
+    const float eff_focal = (focal_override_ > 0) ? focal_override_ : platform_.focal_length_px;
+
     {
         std::lock_guard<std::mutex> lk(preint_mtx_);
-        if (preint_.valid && platform_.focal_length_px > 0) {
-            float shift_bx =  platform_.focal_length_px * preint_.dgz;  // yaw → lateral (body)
-            float shift_by = -platform_.focal_length_px * preint_.dgy;  // pitch → vertical (body)
+        if (preint_.valid && eff_focal > 0) {
+            float shift_bx =  eff_focal * preint_.dgz;  // yaw → lateral (body)
+            float shift_by = -eff_focal * preint_.dgy;  // pitch → vertical (body)
             // Fix #69: map body-frame shift into image frame (transpose of the
             // orthonormal axis map = its inverse)
             float shift_x = axis_m00_ * shift_bx + axis_m10_ * shift_by;
@@ -698,14 +718,27 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     float dt = static_cast<float>(frame.info.timestamp_us - prev_timestamp_us_) / 1'000'000.0f;
     if (dt <= 0 || dt > 1.0f) dt = 0.066f;
     
-    // Use platform-specific focal length
-    float focal = platform_.focal_length_px;
+    // Use platform-specific focal length (Fix #71: env override wins)
+    float focal = eff_focal;
     float pixel_to_meter = (ground_distance > 0.1f) ? ground_distance / focal : 0;
     
     float raw_dx = filtered_dx_px * pixel_to_meter;
     float raw_dy = filtered_dy_px * pixel_to_meter;
     float raw_vx = (dt > 0) ? raw_dx / dt : 0;
     float raw_vy = (dt > 0) ? raw_dy / dt : 0;
+
+    // Fix #72: flow diagnostics (env-gated, ~5Hz throttle). img = raw image-frame
+    // medians (pre axis-map), body = filtered px after axis-map, hov = hover damper
+    // state, mm = micro_motion_avg vs the 0.5px hover-exit threshold.
+    if (vo_debug_) {
+        static int vodbg_n = 0;
+        if (++vodbg_n % 3 == 0) {
+            fprintf(stderr,
+                "[VODBG] vf=%d img=(%.3f,%.3f) body=(%.3f,%.3f) hov=%d mm=%.3f dt=%.3f raw=(%.4f,%.4f)\n",
+                valid_flow, median_dx, median_dy, filtered_dx_px, filtered_dy_px,
+                hover_.is_hovering ? 1 : 0, hover_.micro_motion_avg, dt, raw_dx, raw_dy);
+        }
+    }
     
     // ════════════════════════════════════════════════════
     // Phase 2: Kalman filter (adaptive noise + IMU prediction)

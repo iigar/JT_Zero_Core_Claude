@@ -6,6 +6,7 @@
 #include "jt_zero/runtime.h"
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace jtzero {
@@ -410,7 +411,14 @@ void Runtime::sensor_loop() {
             // Fix 6: accumulate bias-corrected gyro rotation between T6 camera frames.
             // T1 runs at 200 Hz, T6 at 15 Hz → ~13 samples accumulated per camera frame.
             // camera_.accumulate_gyro() is thread-safe (mutex inside VisualOdometry).
-            camera_.accumulate_gyro(gx, gy, gz - gyro_z_bias, dt_imu);
+            // Fix #70: only when the IMU is real hardware. Without FC and without MPU
+            // this branch runs on the SIMULATED IMU whose synthetic rotation seeds LK
+            // with fake flow (±0.45px ~9s waves on a static bench). A real camera must
+            // never consume sim IMU — VO falls back to pure-optical (hints off).
+            // In full simulator mode (sim camera + sim IMU) hints stay on: consistent.
+            if (simulator_mode_ || !imu_.is_simulated()) {
+                camera_.accumulate_gyro(gx, gy, gz - gyro_z_bias, dt_imu);
+            }
 
             // Barometer: every 4th cycle (50 Hz)
             if (cycle % 4 == 0) {
@@ -951,13 +959,21 @@ void Runtime::camera_loop() {
             // VO velocity 2× too large → EKF3 over-compensates → oscillation.
             // At 100m+: no change — cam_altitude >> 0.1 in both cases, baro used correctly.
             // Fallback 1.0m only on ground (baro ≈ 0) or when baro unavailable.
+            // Fix #71: bench fallback configurable via JTZERO_GROUND_DIST (m). On the
+            // bench there is no rangefinder and baro altitude ≈ 0, so the fixed 1.0m
+            // fallback distorts the px→m scale (real camera height e.g. 0.905m).
+            static const float ground_fallback = [] {
+                const char* e = std::getenv("JTZERO_GROUND_DIST");
+                float v = e ? std::strtof(e, nullptr) : 0.0f;
+                return (v > 0.05f && v < 100.0f) ? v : 1.0f;
+            }();
             float ground_dist;
             if (snap_a.range_valid) {
                 ground_dist = snap_a.range_distance;
             } else if (cam_altitude > 0.1f) {
                 ground_dist = cam_altitude;
             } else {
-                ground_dist = 1.0f;
+                ground_dist = ground_fallback;
             }
 
             // Feed altitude and yaw to camera VO for adaptive params + hover correction
@@ -967,7 +983,12 @@ void Runtime::camera_loop() {
             // Fix 4/1: feed IMU data to VO for Kalman prediction + consistency check.
             // Must be called BEFORE tick() so the hint is consumed in the same frame.
             // acc_x/y in m/s² (body frame), gyro_z in rad/s.
-            camera_.set_imu_hint(cam_acc_x, cam_acc_y, cam_gyro_z);
+            // Fix #70: feed only real IMU data (FC telemetry or hardware MPU). Sim IMU
+            // acc/gyro would poison the Kalman predict of a real camera's VO.
+            bool imu_real = simulator_mode_ || mavlink_.has_fc_data() || !imu_.is_simulated();
+            if (imu_real) {
+                camera_.set_imu_hint(cam_acc_x, cam_acc_y, cam_gyro_z);
+            }
 
             camera_.tick(ground_dist);
             
