@@ -908,7 +908,13 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // EKF3 handles noise via covariance weighting, NOT by toggling the source on/off.
     // Cutting off VISION_POSITION_ESTIMATE (by setting valid=false) causes EKF3 timeout
     // → position drift. Better to send with higher covariance than to stop sending.
-    bool position_update = running_confidence_ > 0.15f && inlier_count >= adaptive_.min_inliers;
+    // Fix #76: absolute brightness floor. confidence/inlier_count alone can look
+    // "healthy" on a dark or covered camera (documented: bright=9 gave conf=0.55) —
+    // the spike filter only catches SUDDEN drops relative to a rolling average, not
+    // a persistently dark frame. Gating here (not just result.valid below) also stops
+    // pose_x_/pose_y_ integration, so a dark camera can't silently drift the position.
+    bool position_update = running_confidence_ > 0.15f && inlier_count >= adaptive_.min_inliers
+        && frame_brightness_ >= MIN_VALID_BRIGHTNESS;
     
     if (position_update) {
         pose_x_ += result.dx;
@@ -1309,14 +1315,27 @@ bool CameraPipeline::tick(float ground_distance) {
         bool is_dark_spike   = (bright_rolling_avg_ >= SPIKE_MIN_AVG &&
                                 frame_brightness_ < bright_rolling_avg_ * SPIKE_DOWN_FACTOR);
         if (is_bright_spike || is_dark_spike) {
-            std::printf("[VO] %s spike: bright=%.0f avg=%.0f — suppressing VO %ds\n",
-                        is_bright_spike ? "bright" : "dark",
-                        frame_brightness_, bright_rolling_avg_,
-                        SPIKE_SUPPRESS / 15);
-            spike_suppress_frames_ = SPIKE_SUPPRESS;
-            // Do NOT update rolling avg with spike value
+            spike_consecutive_frames_++;
+            // Fix #77: a transient spike lasts at most SPIKE_SUPPRESS frames by design.
+            // If "spike" classification persists LONGER than that, brightness didn't
+            // blip — it genuinely changed and the stale average is the problem, not
+            // the current frame. Re-baseline immediately instead of staying deadlocked.
+            if (spike_consecutive_frames_ > SPIKE_SUPPRESS) {
+                std::printf("[VO] brightness re-baseline: avg=%.0f was stuck, snapping to current=%.0f\n",
+                            bright_rolling_avg_, frame_brightness_);
+                bright_rolling_avg_ = frame_brightness_;
+                spike_consecutive_frames_ = 0;
+            } else {
+                std::printf("[VO] %s spike: bright=%.0f avg=%.0f — suppressing VO %ds\n",
+                            is_bright_spike ? "bright" : "dark",
+                            frame_brightness_, bright_rolling_avg_,
+                            SPIKE_SUPPRESS / 15);
+                spike_suppress_frames_ = SPIKE_SUPPRESS;
+                // Do NOT update rolling avg with spike value
+            }
         } else {
             // EMA update only on non-spike frames
+            spike_consecutive_frames_ = 0;
             bright_rolling_avg_ = 0.9f * bright_rolling_avg_ + 0.1f * frame_brightness_;
         }
     }

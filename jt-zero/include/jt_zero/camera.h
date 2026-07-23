@@ -601,6 +601,14 @@ private:
     static constexpr float VEL_BIAS_GATE       = 0.5f;   // m/s gate — skip during fast maneuvers
     static constexpr float MIN_HOVER_FOR_BIAS  = 5.0f;   // sec stable hover before fast-path fires
     static constexpr int   BIAS_MIN_BRIGHTNESS = 4;       // camera must see something (>dark floor bright=1-2)
+    // Fix #76: absolute brightness floor for result.valid — closes a gap the spike
+    // filter (Fix #58/#59) does NOT cover. Spike suppress only fires on a SUDDEN
+    // change relative to a rolling average; a camera that starts (or slowly drifts)
+    // dark/covered never triggers a spike, so vo_valid could stay true on a frame
+    // with no real visual signal. Reuses the VO Fallback threshold (native_bridge.py
+    // BRIGHT_DROP=20) for consistency — below this the CSI stream is considered
+    // unusable elsewhere in the same codebase.
+    static constexpr float MIN_VALID_BRIGHTNESS = 20.0f;
 
     // Fix #65: position_uncertainty clamp (meters, 1-sigma) sent to EKF3 as VISION cov.
     // FLOOR = FC VISO_POS_M_NSE — never claim better than the FC baseline.
@@ -902,6 +910,13 @@ private:
     float frame_brightness_{0};       // average pixel brightness 0-255
     float bright_rolling_avg_{0};     // EMA of brightness (spike baseline)
     int   spike_suppress_frames_{0};  // frames remaining in spike suppression
+    // Fix #77: consecutive-spike deadlock breaker. bright_rolling_avg_ only updates
+    // on non-spike frames — if brightness makes a real, LASTING change (camera was
+    // genuinely dark, then genuinely lit again), every frame classifies as a spike
+    // relative to the stale average forever, so the average can never catch up and
+    // valid stays false permanently. Counting consecutive spike frames lets us force
+    // a re-baseline once a "spike" has outlasted the suppression window itself.
+    int   spike_consecutive_frames_{0};
     
     // ── Thread-safe feature snapshot (T6 writes with release, Python reads with acquire) ──
     FeaturePoint     features_snapshot_[MAX_FEATURES];
