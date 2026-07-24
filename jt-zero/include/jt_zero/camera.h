@@ -162,18 +162,41 @@ struct HoverState {
     float hover_duration_sec{0};
     float yaw_drift_rate{0};         // rad/s, estimated gyro drift
     float corrected_yaw{0};          // rad, corrected yaw
-    float micro_motion_avg{0};       // px, average feature displacement
+    float micro_motion_avg{0};       // px, average feature displacement (diagnostic only, Fix #78)
     int   stable_frame_count{0};     // consecutive frames with low motion
     float accumulated_yaw_drift{0};  // rad, total drift correction applied
     // Fix 3: gyro bias estimated during confirmed hover (rad/s)
     // In true hover the drone doesn't rotate → any persistent gyro_z reading is bias
     float gyro_z_bias{0};
+    // Fix #78: EMA of the fraction of tracked features that are near-zero this frame
+    // (population-based signal, not a single scalar median magnitude). See constants below.
+    float stable_feature_frac{1.0f};
 
     // Thresholds
-    static constexpr float HOVER_MOTION_THRESH = 0.5f;  // px, below = hovering
-    static constexpr int   HOVER_MIN_FRAMES    = 30;     // frames before hover confirmed
+    static constexpr float HOVER_MOTION_THRESH = 0.5f;  // px, diagnostic only (Fix #78, see below)
+    // Fix #78b: 30 frames (~2s @ 15fps) was tuned for clean-signal hover confirmation, but on
+    // bench texture with a bursty per-feature signal, mid-push "looks stable" gaps of ~3s were
+    // measured (RAWFLOW/VODBG, 20:20:44-47 test window) — long enough to re-confirm is_hovering
+    // and re-trigger the Kalman velocity decay (kf_vx_ *= 0.85f, camera_pipeline.cpp:857, fires
+    // 1s after is_hovering) and pose damper (result.dx *= 0.1f, fires 2s after) mid-motion,
+    // repeatedly crushing accumulated velocity/pose during a single continuous physical push.
+    // Raised with margin above the measured 3s gap; still far below realistic LOITER hover
+    // durations (many seconds to minutes), so genuine hover confirmation is only modestly slower.
+    static constexpr int   HOVER_MIN_FRAMES    = 90;     // frames before hover confirmed (~6s @ 15fps)
     static constexpr float DRIFT_ALPHA         = 0.02f;  // EMA smoothing for drift rate
     static constexpr float BIAS_ALPHA          = 0.005f; // much slower EMA for bias (stable estimate)
+    // Fix #78: bursty per-feature signal broke the hover-exit criterion. On dense-but-uneven
+    // texture, individual frames alternate between near-total feature agreement (real motion:
+    // near0%=0-5%) and near-total stillness (rest: near0%=90-95%) — bench-verified via RAWFLOW.
+    // A single EMA'd scalar median magnitude (HOVER_MOTION_THRESH above) smooths across this
+    // burst pattern with alpha=0.1 (~10-frame time constant) and never crosses threshold during
+    // sustained real motion, because it never sees the moving frames in isolation. The fraction
+    // below is a per-frame population vote (already self-averaging over ~50-100 features), so it
+    // needs much lighter smoothing to reject single-frame flicker while reacting within a few frames.
+    static constexpr float NEAR_ZERO_PX_SQ          = 0.0225f; // 0.15px^2, mirrors RAWFLOW (Fix #74) threshold
+    static constexpr float STABLE_FRAC_ALPHA        = 0.3f;    // EMA alpha for stable_feature_frac
+    static constexpr float HOVER_STABLE_FRAC_THRESH = 0.5f;    // frame counted "stable" when EMA above this
+    static constexpr int   HOVER_MIN_VALID_FLOW     = 5;       // below this, feature population too small to trust — skip update
 };
 
 // ─── Visual Odometry Result ──────────────────────────────
@@ -588,7 +611,9 @@ private:
     float yaw_hint_{0};
     bool  yaw_hint_valid_{false};
     // Fix 3: gyro_z passed so hover can estimate IMU bias (in true hover rotation = 0)
-    void update_hover_state(float median_dx, float median_dy, float dt, float gyro_z);
+    // Fix #78: near_zero_count/valid_flow drive the fraction-based hover-exit criterion
+    void update_hover_state(float median_dx, float median_dy, float dt, float gyro_z,
+                             int near_zero_count, int valid_flow);
 
     // Fix #60: VO velocity bias (camera tilt + floor texture → systematic raw_v ≠ 0 in hover)
     // EMA estimated during stable hover, subtracted from raw_v BEFORE Kalman update.

@@ -467,14 +467,32 @@ void VisualOdometry::update_adaptive_params() {
 }
 
 // ── Hover yaw correction ──
-void VisualOdometry::update_hover_state(float median_dx, float median_dy, float dt, float gyro_z) {
-    // Compute average micro-motion magnitude (in pixels)
+void VisualOdometry::update_hover_state(float median_dx, float median_dy, float dt, float gyro_z,
+                                         int near_zero_count, int valid_flow) {
+    // Compute average micro-motion magnitude (in pixels) — diagnostic only since Fix #78,
+    // kept for [VODBG] logging continuity; no longer drives the hover decision below.
     float motion_mag = std::sqrt(median_dx * median_dx + median_dy * median_dy);
-
-    // EMA of motion magnitude
     hover_.micro_motion_avg = 0.1f * motion_mag + 0.9f * hover_.micro_motion_avg;
 
-    if (hover_.micro_motion_avg < HoverState::HOVER_MOTION_THRESH) {
+    // Fix #78: fraction-based hover-exit criterion, replaces the EMA-of-median-magnitude
+    // check above. Root cause it fixes: on dense-but-uneven texture, individual VO ticks
+    // alternate between near-total feature agreement (real motion) and near-total stillness
+    // (rest) — RAWFLOW-verified. The old EMA (alpha=0.1, ~10-frame time constant) smoothed
+    // straight through this burst pattern and never saw a moving frame in isolation, so
+    // is_hovering stayed true 100% of the time even during continuous physical motion.
+    // Skip the update entirely when too few features are tracked this frame (Fix #78) —
+    // a fraction computed from <5 features is statistical noise, not a real population vote.
+    // Leaving stable_feature_frac/stable_frame_count untouched here means a sparse frame
+    // neither confirms nor breaks hover; the next well-populated frame decides.
+    bool is_stable_frame = hover_.stable_feature_frac > HoverState::HOVER_STABLE_FRAC_THRESH;
+    if (valid_flow >= HoverState::HOVER_MIN_VALID_FLOW) {
+        float frame_frac = static_cast<float>(near_zero_count) / static_cast<float>(valid_flow);
+        hover_.stable_feature_frac = HoverState::STABLE_FRAC_ALPHA * frame_frac +
+            (1.0f - HoverState::STABLE_FRAC_ALPHA) * hover_.stable_feature_frac;
+        is_stable_frame = hover_.stable_feature_frac > HoverState::HOVER_STABLE_FRAC_THRESH;
+    }
+
+    if (is_stable_frame) {
         hover_.stable_frame_count++;
         if (hover_.stable_frame_count >= HoverState::HOVER_MIN_FRAMES) {
             hover_.is_hovering = true;
@@ -672,11 +690,18 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     float dx_copy[MAX_FEATURES];
     float dy_copy[MAX_FEATURES];
     int valid_flow = 0;
-    
+    // Fix #78: population-vote for the hover-exit criterion — counted unconditionally
+    // (not gated behind vo_debug_) since it's a cheap squared-distance compare and the
+    // fraction is now load-bearing for update_hover_state(), not just a debug metric.
+    int near_zero_count = 0;
+
     for (size_t i = 0; i < active_count_; ++i) {
         if (features_[i].tracked) {
-            dx_arr[valid_flow] = features_[i].x - prev_features_[i].x;
-            dy_arr[valid_flow] = features_[i].y - prev_features_[i].y;
+            float fx = features_[i].x - prev_features_[i].x;
+            float fy = features_[i].y - prev_features_[i].y;
+            dx_arr[valid_flow] = fx;
+            dy_arr[valid_flow] = fy;
+            if (fx * fx + fy * fy < HoverState::NEAR_ZERO_PX_SQ) near_zero_count++;
             valid_flow++;
         }
     }
@@ -684,24 +709,24 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // Fix #74: raw per-feature flow distribution (env JTZERO_VO_DEBUG=1), throttled.
     // Disambiguates: individual features show real motion (median/MAD aggregation bug)
     // vs individual features ALSO near-zero (LK tracker convergence failure).
+    // near_zero_count/valid_flow reused from the loop above (Fix #78) — same threshold,
+    // single source of truth instead of a second independent near-zero count here.
     if (vo_debug_) {
         static int dbg74_n = 0;
         if (++dbg74_n % 3 == 0 && valid_flow > 0) {
             float mag_min = 1e9f, mag_max = -1e9f, mag_sum = 0;
-            int near_zero = 0;
             for (int i = 0; i < valid_flow; ++i) {
                 float mag = std::sqrt(dx_arr[i]*dx_arr[i] + dy_arr[i]*dy_arr[i]);
                 mag_min = std::min(mag_min, mag);
                 mag_max = std::max(mag_max, mag);
                 mag_sum += mag;
-                if (mag < 0.15f) near_zero++;
             }
             fprintf(stderr,
                 "[RAWFLOW] n=%d min=%.3f max=%.3f mean=%.3f near0=%d/%d\n",
-                valid_flow, mag_min, mag_max, mag_sum / valid_flow, near_zero, valid_flow);
+                valid_flow, mag_min, mag_max, mag_sum / valid_flow, near_zero_count, valid_flow);
         }
     }
-    
+
     float median_dx = 0, median_dy = 0;
     int inlier_count = 0;
     float inlier_sum_x = 0, inlier_sum_y = 0;
@@ -763,9 +788,10 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         static int vodbg_n = 0;
         if (++vodbg_n % 3 == 0) {
             fprintf(stderr,
-                "[VODBG] vf=%d img=(%.3f,%.3f) body=(%.3f,%.3f) hov=%d mm=%.3f dt=%.3f raw=(%.4f,%.4f)\n",
+                "[VODBG] vf=%d img=(%.3f,%.3f) body=(%.3f,%.3f) hov=%d mm=%.3f sf=%.3f dt=%.3f raw=(%.4f,%.4f)\n",
                 valid_flow, median_dx, median_dy, filtered_dx_px, filtered_dy_px,
-                hover_.is_hovering ? 1 : 0, hover_.micro_motion_avg, dt, raw_dx, raw_dy);
+                hover_.is_hovering ? 1 : 0, hover_.micro_motion_avg, hover_.stable_feature_frac,
+                dt, raw_dx, raw_dy);
         }
     }
     
@@ -853,6 +879,20 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     result.dy = kf_vy_ * dt;
     result.dz = 0;
     result.vz = 0;
+
+    // Fix #79 (diagnostic): isolate Kalman-filter loss from hover-gate loss. Same-tick
+    // raw_vx/raw_vy (VO measurement) vs kf_vx_/kf_vy_ (post-update state) vs Kx/Ky (gain)
+    // — if Kx/Ky are small even while hov=0, the R/Q balance itself is smoothing/lagging
+    // real bursts independent of the hover damper (A3 session 2026-07-24/25 found the
+    // pass-through ratio stayed ~15-38% after Fix #78/#78b, suspected non-hover cause).
+    if (vo_debug_) {
+        static int kfdbg_n = 0;
+        if (++kfdbg_n % 3 == 0) {
+            fprintf(stderr,
+                "[KFDBG] raw=(%.4f,%.4f) kf=(%.4f,%.4f) K=(%.3f,%.3f) R=%.3f Q=%.4f hov=%d\n",
+                raw_vx, raw_vy, kf_vx_, kf_vy_, Kx, Ky, R, Q, hover_.is_hovering ? 1 : 0);
+        }
+    }
 
     // ════════════════════════════════════════════════════
     // Phase 3: IMU-aided validation (fixed)
@@ -954,7 +994,8 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // ════════════════════════════════════════════════════
 
     // Fix 3: pass gyro_z so hover state can estimate IMU bias during stationary hover
-    update_hover_state(median_dx, median_dy, dt, imu_gz_);
+    // Fix #78: near_zero_count/valid_flow drive the fraction-based hover-exit criterion
+    update_hover_state(median_dx, median_dy, dt, imu_gz_, near_zero_count, valid_flow);
 
     // Fix #61: two-tier VO velocity bias calibration.
     // Problem with Fix #60: hover_.is_hovering requires motion_avg < 0.5px for 30 frames.
