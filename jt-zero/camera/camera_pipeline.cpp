@@ -868,8 +868,43 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // Fix #60: subtract systematic VO velocity bias BEFORE Kalman update.
     // Camera tilt ~5° pitch + floor texture → raw_vy ≠ 0 even in hover.
     // raw_vx unchanged so Phase 5 EMA can sample the original measurement.
-    kf_vx_ += Kx * (raw_vx - vx_bias_ - kf_vx_);
-    kf_vy_ += Ky * (raw_vy - vy_bias_ - kf_vy_);
+    float measured_vx = raw_vx - vx_bias_;
+    float measured_vy = raw_vy - vy_bias_;
+
+    // Fix #80 (v1, REVERTED — kept as a documented dead end): compared |measured| to the
+    // CURRENT |kf_vx_| to decide attack vs release. Self-referential and unstable: once
+    // kf_vx_ drifted away from zero for ANY reason (measurement noise, IMU predict bias),
+    // small noisy readings were then ALWAYS "smaller than kf_vx_" → permanent release →
+    // weak correction → drift compounds further, making future noise look even smaller by
+    // comparison. Confirmed on hardware via [KFDBG]: kf_vx_ crept to -0.09 m/s then
+    // kf_vy_ to +0.12 m/s over a ~15s bench test while raw_vx/vy stayed ~0.0001-0.005 the
+    // whole time (no real motion) — /api/vo/trail showed 0.71m of pure drift, not signal.
+    //
+    // Fix #80 (v2): base attack/release on whether THIS measurement is itself large enough
+    // to be a real spike (fixed absolute threshold), not on comparison to kf_vx_'s own
+    // (possibly already-drifted) state — breaks the self-reinforcing feedback loop above.
+    // MAX_RELEASE_FRAMES is a safety cap: force a full-strength correction after ~2s of
+    // consecutive release-mode frames regardless, bounding worst-case drift even under a
+    // sustained small bias that never individually crosses SPIKE_THRESH_MPS. Variance
+    // update below intentionally uses the un-scaled Kx/Ky — kf_vx_var_ tracks the
+    // estimator's true confidence; the release scaling is a deliberate behavioral hold on
+    // the state itself, not a claim that confidence actually changed. Genuine stops are
+    // still handled by the existing hover-decay (kf_vx_ *= 0.85f when is_hovering &&
+    // hover_duration_sec > 1.0f, Fix #53a), driven by the population-vote hover signal
+    // (Fix #78) — unaffected by this change.
+    static constexpr float SPIKE_THRESH_MPS      = 0.01f; // ~1cm/s, above bench noise floor
+    static constexpr float KALMAN_RELEASE_FACTOR = 0.15f;
+    static constexpr int   MAX_RELEASE_FRAMES    = 30;    // ~2s @ 15fps
+
+    bool is_spike_x = std::fabs(measured_vx) > SPIKE_THRESH_MPS;
+    bool is_spike_y = std::fabs(measured_vy) > SPIKE_THRESH_MPS;
+    release_count_x_ = is_spike_x ? 0 : release_count_x_ + 1;
+    release_count_y_ = is_spike_y ? 0 : release_count_y_ + 1;
+    float Kx_eff = (is_spike_x || release_count_x_ > MAX_RELEASE_FRAMES) ? Kx : Kx * KALMAN_RELEASE_FACTOR;
+    float Ky_eff = (is_spike_y || release_count_y_ > MAX_RELEASE_FRAMES) ? Ky : Ky * KALMAN_RELEASE_FACTOR;
+
+    kf_vx_ += Kx_eff * (measured_vx - kf_vx_);
+    kf_vy_ += Ky_eff * (measured_vy - kf_vy_);
     kf_vx_var_ *= (1.0f - Kx);
     kf_vy_var_ *= (1.0f - Ky);
 
@@ -889,8 +924,8 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         static int kfdbg_n = 0;
         if (++kfdbg_n % 3 == 0) {
             fprintf(stderr,
-                "[KFDBG] raw=(%.4f,%.4f) kf=(%.4f,%.4f) K=(%.3f,%.3f) R=%.3f Q=%.4f hov=%d\n",
-                raw_vx, raw_vy, kf_vx_, kf_vy_, Kx, Ky, R, Q, hover_.is_hovering ? 1 : 0);
+                "[KFDBG] raw=(%.4f,%.4f) kf=(%.4f,%.4f) K=(%.3f,%.3f) Keff=(%.3f,%.3f) R=%.3f Q=%.4f hov=%d\n",
+                raw_vx, raw_vy, kf_vx_, kf_vy_, Kx, Ky, Kx_eff, Ky_eff, R, Q, hover_.is_hovering ? 1 : 0);
         }
     }
 
@@ -1103,6 +1138,8 @@ void VisualOdometry::reset() {
     kf_vy_prev_ = 0;
     kf_vx_var_ = 1.0f;
     kf_vy_var_ = 1.0f;
+    release_count_x_ = 0;
+    release_count_y_ = 0;
     pose_var_x_ = POS_VAR_INIT;  // Fix #65: reset uncertainty to FLOOR, not 1.0 (fresh start = full confidence)
     pose_var_y_ = POS_VAR_INIT;
     running_confidence_ = 0.5f;

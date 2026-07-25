@@ -544,6 +544,10 @@ private:
     float kf_vx_var_{1.0f}, kf_vy_var_{1.0f}; // velocity variance
     // Fix 1: pre-update velocity snapshot for correct imu_consistency computation
     float kf_vx_prev_{0}, kf_vy_prev_{0};
+    // Fix #80: consecutive-release-frame counters for the asymmetric Kalman gain safety
+    // cap (MAX_RELEASE_FRAMES) — bounds how long the weakened correction can run before a
+    // full-strength update is forced, preventing unbounded drift from small biases.
+    int release_count_x_{0}, release_count_y_{0};
 
     // Fix 5: accumulated position variance from KF covariance (m²)
     // Grows each frame by kf_v*_var_ * dt², decays slowly when confidence is high
