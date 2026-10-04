@@ -1,5 +1,16 @@
 # JT-Zero Changelog
 
+## 2026-10-04 — Fix #81/#82: VO-поза рахується рівно раз на кадр
+
+### Fix #81 — дедуп MAVLink-інтеграції
+- `vo_pose_x_ += vo.dx` лише для нового кадру (`vo.timestamp_us != last_vo_ts_`). Було: ~25Гц відправка × 15Гц VO → поза в EKF3 ≈×1.67.
+- `jt-zero/mavlink/mavlink_interface.cpp`, `jt-zero/include/jt_zero/mavlink_interface.h`
+
+### Fix #82 — трек без втрат кадрів
+- C++ монотонний акумулятор `vo_cum_x/y/z` (раз на кадр) → `get_camera()`; `_record_vo_trail` бере його дельту. Було: 10Гц опитування 15Гц VO → ~⅓ кадрів губилось.
+- `camera.h`, `camera_pipeline.cpp`, `python_bindings.cpp`, `backend/native_bridge.py`
+- ⚠️ A3-заміри #78-#80 (через трек) потрібно перевиміряти. Обидва фікси ще НЕ верифіковані на залізі.
+
 ## 2026-04-20 — Mobile UI responsive layout
 
 ### Зміни

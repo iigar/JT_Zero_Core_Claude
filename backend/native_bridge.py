@@ -135,6 +135,7 @@ class NativeRuntime:
         self._vo_pos_x = 0.0            # accumulated VO position
         self._vo_pos_y = 0.0
         self._vo_pos_z = 0.0
+        self._vo_last_cum = None        # Fix #82: last seen C++ vo_cum_{x,y,z}
 
         # ── GPS-loss position uncertainty warning ──
         # Fires when GPS is degraded and Kalman-derived uncertainty exceeds thresholds.
@@ -419,10 +420,21 @@ class NativeRuntime:
         now = time.time()
         try:
             cam = dict(self._rt.get_camera())
-            # Accumulate deltas into absolute position
-            self._vo_pos_x += cam.get('vo_dx', 0)
-            self._vo_pos_y += cam.get('vo_dy', 0)
-            self._vo_pos_z += cam.get('vo_dz', 0)
+            # Fix #82: this runs at ~10Hz but VO produces ~15Hz — summing the latest
+            # vo_dx lost ~1/3 of frames. Diff C++'s monotonic per-frame accumulator
+            # instead (pose resets just zero _vo_pos_*, the diff keeps working).
+            if 'vo_cum_x' in cam:
+                cum = (cam['vo_cum_x'], cam['vo_cum_y'], cam['vo_cum_z'])
+                if self._vo_last_cum is not None:
+                    self._vo_pos_x += cum[0] - self._vo_last_cum[0]
+                    self._vo_pos_y += cum[1] - self._vo_last_cum[1]
+                    self._vo_pos_z += cum[2] - self._vo_last_cum[2]
+                self._vo_last_cum = cum
+            else:
+                # Older native module without vo_cum_* — legacy (lossy) path
+                self._vo_pos_x += cam.get('vo_dx', 0)
+                self._vo_pos_y += cam.get('vo_dy', 0)
+                self._vo_pos_z += cam.get('vo_dz', 0)
         except Exception:
             return
         # Sample at interval

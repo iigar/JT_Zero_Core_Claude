@@ -159,6 +159,7 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
         "vo_position_uncertainty"_a = cs.vo_position_uncertainty,
         "vo_total_distance"_a = cs.vo_total_distance,
         "vo_dx"_a = cs.vo_dx, "vo_dy"_a = cs.vo_dy, "vo_dz"_a = cs.vo_dz,
+        "vo_cum_x"_a = cs.vo_cum_x, "vo_cum_y"_a = cs.vo_cum_y, "vo_cum_z"_a = cs.vo_cum_z,
         "vo_vx"_a = cs.vo_vx, "vo_vy"_a = cs.vo_vy,
         "vo_valid"_a = cs.vo_valid,
         // Platform (auto-detected)

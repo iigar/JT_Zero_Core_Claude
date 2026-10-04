@@ -1300,7 +1300,10 @@ bool CameraPipeline::tick(float ground_distance) {
             vo_.set_frame_brightness(frame_brightness_);  // Fix #63: brightness gate (last known)
             vo_result_ = vo_.process(current_frame_, ground_distance);
             frame_count_++;
-            
+            vo_cum_x_ += vo_result_.dx;  // Fix #82
+            vo_cum_y_ += vo_result_.dy;
+            vo_cum_z_ += vo_result_.dz;
+
             // Copy features to thread-safe snapshot (release barrier ensures
             // features_snapshot_ data is visible when count is read with acquire)
             size_t fc = vo_.feature_count();
@@ -1431,6 +1434,11 @@ bool CameraPipeline::tick(float ground_distance) {
         vo_result_.dy = 0.0f;
         spike_suppress_frames_--;
     }
+
+    // Fix #82: accumulate the FINAL per-frame displacement exactly once per frame
+    vo_cum_x_ += vo_result_.dx;
+    vo_cum_y_ += vo_result_.dy;
+    vo_cum_z_ += vo_result_.dz;
 
     // Copy features to thread-safe snapshot
     {
@@ -1682,6 +1690,9 @@ CameraPipelineStats CameraPipeline::get_stats() const {
     stats.vo_dx = vo_result_.dx;
     stats.vo_dy = vo_result_.dy;
     stats.vo_dz = vo_result_.dz;
+    stats.vo_cum_x = vo_cum_x_;
+    stats.vo_cum_y = vo_cum_y_;
+    stats.vo_cum_z = vo_cum_z_;
     stats.vo_vx = vo_result_.vx;
     stats.vo_vy = vo_result_.vy;
     stats.vo_valid = vo_result_.valid;

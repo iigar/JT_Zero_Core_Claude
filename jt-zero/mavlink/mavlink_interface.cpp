@@ -1387,9 +1387,13 @@ void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
         // ARM auto-reset fires first (pose→0), so first armed packet is always (0,0,0).
         bool should_send = vo.valid && state.armed;
         if (should_send) {
-            if (vo.valid) {
+            // Fix #81: integrate each VO frame exactly once. Without the timestamp
+            // check the same dx was added on every send (~25Hz vs ~15Hz VO) → pose
+            // sent to EKF3 was ~1.67× the real displacement, with per-frame jitter.
+            if (vo.valid && vo.timestamp_us != last_vo_ts_) {
                 vo_pose_x_ += vo.dx;
                 vo_pose_y_ += vo.dy;
+                last_vo_ts_ = vo.timestamp_us;
             }
 
             // Fix #66: also send VISION_POSITION_ESTIMATE (#102). ArduPilot fuses ODOMETRY

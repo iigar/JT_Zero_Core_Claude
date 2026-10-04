@@ -744,6 +744,9 @@ struct CameraPipelineStats {
     float      vo_position_uncertainty{0}; // meters
     float      vo_total_distance{0};       // meters total path
     float      vo_dx{0}, vo_dy{0}, vo_dz{0};
+    // Fix #82: monotonic Σdx over every processed frame (never reset) — consumers
+    // poll at their own rate and diff it, so no frame is lost or double-counted.
+    double     vo_cum_x{0}, vo_cum_y{0}, vo_cum_z{0};
     float      vo_vx{0}, vo_vy{0};
     bool       vo_valid{false};
     // Platform info (auto-detected)
@@ -946,7 +949,11 @@ private:
     // valid stays false permanently. Counting consecutive spike frames lets us force
     // a re-baseline once a "spike" has outlasted the suppression window itself.
     int   spike_consecutive_frames_{0};
-    
+
+    // Fix #82: monotonic accumulator of final per-frame vo_result_.dx/dy/dz (after
+    // spike suppression). Written by T6 only; exposed via get_stats().
+    double vo_cum_x_{0}, vo_cum_y_{0}, vo_cum_z_{0};
+
     // ── Thread-safe feature snapshot (T6 writes with release, Python reads with acquire) ──
     FeaturePoint     features_snapshot_[MAX_FEATURES];
     std::atomic<uint32_t> features_snapshot_count_{0};
